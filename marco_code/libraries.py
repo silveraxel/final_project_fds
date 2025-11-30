@@ -1,0 +1,368 @@
+import os
+import pandas as pd
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from sentence_transformers import SentenceTransformer
+from torch_geometric.data import HeteroData
+from torch_geometric.transforms import RandomLinkSplit, ToUndirected
+import torch_geometric.transforms as T
+from torch_geometric.nn import SAGEConv, to_hetero
+import torch.nn.functional as F
+from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.nn import JumpingKnowledge
+
+from params import *
+
+
+
+
+def load_node_csv(path, index_col, encoders=None, **kwargs):
+    df = pd.read_csv(path, index_col=index_col, **kwargs)
+    mapping = {index: i for i, index in enumerate(df.index.unique())}
+
+    x = None
+    if encoders is not None:
+        xs = []
+        for col, encoder in encoders.items():
+            # Special handling for AggregatedTagEncoder (doesn't use df columns)
+            if isinstance(encoder, AggregatedTagEncoder):
+                xs.append(encoder(df))
+            else:
+                xs.append(encoder(df[col]))
+        x = torch.cat(xs, dim=-1)
+
+    return x, mapping
+
+
+
+def load_edge_csv(path, src_index_col, src_mapping, dst_index_col, dst_mapping,
+                  encoders=None, **kwargs):
+    df = pd.read_csv(path, **kwargs)
+    
+    src = [src_mapping[index] for index in df[src_index_col]]
+    dst = [dst_mapping[index] for index in df[dst_index_col]]
+    edge_index = torch.tensor([src, dst])
+
+    edge_attr = None
+    if encoders is not None:
+        edge_attrs = [encoder(df[col]) for col, encoder in encoders.items()]
+        edge_attr = torch.cat(edge_attrs, dim=-1)
+
+    return edge_index, edge_attr
+
+
+
+def load_edge_csv_tags(path, src_index_col, src_mapping, dst_index_col, dst_mapping,
+                  encoders=None, one_edge_per_row=False, **kwargs):
+    
+    df = pd.read_csv(path, **kwargs)
+    
+    if one_edge_per_row:
+        # Tags mode: Each row becomes one edge (handles duplicates)
+        edge_src = []
+        edge_dst = []
+        edge_attrs = []
+        
+        # Apply encoders first if provided
+        encoded_features = None
+        if encoders is not None:
+            # Handle special case for tag encoders that return (embeddings, df)
+            for col, encoder in encoders.items():
+                result = encoder(df)
+                if isinstance(result, tuple):  # TagEncoder returns (embeddings, df)
+                    encoded_features, df = result
+                else:  # Standard encoder returns just embeddings
+                    encoded_features = result
+        
+        # Create edges row by row
+        for idx, row in df.iterrows():
+            src_id = row[src_index_col]
+            dst_id = row[dst_index_col]
+            
+            # Only add edge if both nodes exist in mappings
+            if src_id in src_mapping and dst_id in dst_mapping:
+                edge_src.append(src_mapping[src_id])
+                edge_dst.append(dst_mapping[dst_id])
+                
+                if encoded_features is not None:
+                    edge_attrs.append(encoded_features[idx])
+        
+        edge_index = torch.tensor([edge_src, edge_dst], dtype=torch.long)
+        edge_attr = torch.stack(edge_attrs) if edge_attrs else None
+        
+    else:
+        # Ratings mode: Assume unique (src, dst) pairs (original behavior)
+        src = [src_mapping[index] for index in df[src_index_col]]
+        dst = [dst_mapping[index] for index in df[dst_index_col]]
+        edge_index = torch.tensor([src, dst])
+        
+        edge_attr = None
+        if encoders is not None:
+            edge_attrs = [encoder(df[col]) for col, encoder in encoders.items()]
+            edge_attr = torch.cat(edge_attrs, dim=-1)
+    
+    return edge_index, edge_attr
+
+
+
+class SequenceEncoder:
+    def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
+        self.model = SentenceTransformer(model_name, device=device)
+
+    @torch.no_grad()
+    def __call__(self, df):
+        x = self.model.encode(df.values, show_progress_bar=True,
+                              convert_to_tensor=True, device=self.device)
+        return x.cpu()
+
+
+
+class GenresEncoder:
+    def __init__(self, sep='|'):
+        self.sep = sep
+
+    def __call__(self, df):
+        genres = {g for col in df.values for g in col.split(self.sep)}
+        mapping = {genre: i for i, genre in enumerate(genres)}
+
+        x = torch.zeros(len(df), len(mapping))
+        for i, col in enumerate(df.values):
+            for genre in col.split(self.sep):
+                x[i, mapping[genre]] = 1
+        return x
+
+
+
+class IdentityEncoder:
+    def __init__(self, dtype=None):
+        self.dtype = dtype
+
+    def __call__(self, df):
+        return torch.from_numpy(df.values).view(-1, 1).to(self.dtype)
+
+
+class AggregatedTagEncoder:
+    def __init__(self, tags_path, movie_mapping, model_name='all-MiniLM-L6-v2', device=None):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
+        self.model = SentenceTransformer(model_name, device=device)
+        self.tags_path = tags_path
+        self.movie_mapping = movie_mapping
+    
+    @torch.no_grad()
+    def __call__(self, df):
+        try:
+            tags_df = pd.read_csv(self.tags_path)
+            
+            # Get unique tags and encode them
+            unique_tags = tags_df['tag'].unique()
+            print(f"Encoding {len(unique_tags)} unique tags for movie features...")
+            
+            tag_embeddings = self.model.encode(
+                unique_tags,
+                show_progress_bar=True,
+                convert_to_tensor=True,
+                device=self.device
+            ).cpu()
+            
+            tag_to_embedding = {tag: tag_embeddings[i] for i, tag in enumerate(unique_tags)}
+            
+            # Initialize empty embeddings for all movies
+            num_movies = len(self.movie_mapping)
+            embedding_dim = tag_embeddings.shape[1]
+            movie_tag_features = torch.zeros(num_movies, embedding_dim)
+            
+            # Group tags by movie
+            movie_tags = tags_df.groupby('movieId')['tag'].apply(list).to_dict()
+            
+            # Aggregate tag embeddings for each movie
+            for movie_id, tags_list in movie_tags.items():
+                if movie_id in self.movie_mapping:
+                    movie_idx = self.movie_mapping[movie_id]
+                    
+                    # Average all tag embeddings for this movie
+                    tag_embs = [tag_to_embedding[tag] for tag in tags_list]
+                    if tag_embs:
+                        movie_tag_features[movie_idx] = torch.stack(tag_embs).mean(dim=0)
+            
+            print(f"Created tag features for {len(movie_tags)} movies")
+            print(f"Tag feature dimension: {embedding_dim}")
+            
+            return movie_tag_features
+            
+        except FileNotFoundError:
+            print("Warning: tags.csv not found, returning zero features")
+            # Return zero features if tags not available
+            return torch.zeros(len(self.movie_mapping), 384)  # Default MiniLM dimension
+
+
+
+class TagEncoder:
+    """Encode individual tags as embeddings (no aggregation)"""
+    def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
+        self.model = SentenceTransformer(model_name, device=device)
+
+    @torch.no_grad()
+    def __call__(self, df):
+        """Encode each individual tag (no aggregation or artificial sentences)"""
+        # Encode each unique tag
+        unique_tags = df['tag'].unique()
+        print(f"Encoding {len(unique_tags)} unique tags...")
+        
+        tag_embeddings = self.model.encode(
+            unique_tags,
+            show_progress_bar=True,
+            convert_to_tensor=True,
+            device=self.device
+        ).cpu()
+        
+        # Create mapping
+        tag_to_embedding = {tag: tag_embeddings[i] for i, tag in enumerate(unique_tags)}
+        
+        # Return embeddings for each row
+        embeddings = []
+        for _, row in df.iterrows():
+            embeddings.append(tag_to_embedding[row['tag']])
+        
+        embeddings = torch.stack(embeddings)
+        
+        # Return (embeddings, df) tuple for compatibility
+        return embeddings, df
+
+
+
+class GNN(torch.nn.Module):
+    """GNN with Jumping Knowledge connections and batch normalization"""
+    def __init__(self, hidden_channels, dropout=0.0, use_bn=False, num_layers=3, jk_mode='cat'):
+        super().__init__()
+        self.num_layers = num_layers
+        self.jk_mode = jk_mode
+        
+        # Convolutional layers (dynamically created based on num_layers)
+        self.convs = torch.nn.ModuleList([
+            SAGEConv((-1, -1), hidden_channels) for _ in range(num_layers)
+        ])
+        
+        self.dropout = torch.nn.Dropout(dropout)
+        
+        # Batch normalization
+        self.use_bn = use_bn
+        if use_bn:
+            self.bns = torch.nn.ModuleList([
+                torch.nn.BatchNorm1d(hidden_channels) for _ in range(num_layers)
+            ])
+        
+        # Jumping Knowledge connection
+        # Modes: 'cat' (concatenation), 'max' (max pooling), 'lstm' (LSTM aggregation)
+        
+        self.jk = JumpingKnowledge(mode=jk_mode, channels=hidden_channels, num_layers=num_layers)
+        
+        # Output projection (only needed for 'cat' mode)
+        if jk_mode == 'cat':
+            self.output_proj = torch.nn.Linear(hidden_channels * num_layers, hidden_channels)
+        
+    def forward(self, x, edge_index):
+        # Store outputs from each layer
+        layer_outputs = []
+        
+        # Apply all convolutional layers
+        for i in range(self.num_layers):
+            x = self.convs[i](x, edge_index)
+            
+            if self.use_bn:
+                x = self.bns[i](x)
+            
+            x = x.relu()
+            x = self.dropout(x)
+            
+            # Store this layer's output for JK
+            layer_outputs.append(x)
+        
+        # Apply Jumping Knowledge to combine all layer outputs
+        x = self.jk(layer_outputs)
+        
+        # Project back to hidden_channels if using concatenation
+        if self.jk_mode == 'cat':
+            x = self.output_proj(x)
+        
+        return x
+
+class Classifier(torch.nn.Module):
+    def __init__(self, hidden_channels, dropout=0.0):
+        super().__init__()
+        
+        input_dim = hidden_channels * 2
+        
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(input_dim, hidden_channels),
+            torch.nn.BatchNorm1d(hidden_channels),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(dropout),
+            
+            torch.nn.Linear(hidden_channels, hidden_channels // 2),
+            torch.nn.BatchNorm1d(hidden_channels // 2),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(dropout),
+            
+            torch.nn.Linear(hidden_channels // 2, 1)
+        )
+        #for layer in self.mlp:
+        #    if isinstance(layer, torch.nn.Linear):
+        #        torch.nn.init.xavier_uniform_(layer.weight, gain=0.1)
+        #        torch.nn.init.zeros_(layer.bias)
+        
+    
+    def forward(self, x_user, x_movie, edge_label_index):
+        edge_feat_user = x_user[edge_label_index[0]]
+        edge_feat_movie = x_movie[edge_label_index[1]]
+        combined = torch.cat([edge_feat_user, edge_feat_movie], dim=-1)
+        return self.mlp(combined).squeeze(-1)
+
+
+class Model(torch.nn.Module):
+    def __init__(self, hidden_channels, num_users, metadata, dropout=0.0, use_bn=False, 
+                 num_gnn_layers=3, jk_mode='cat'):
+        super().__init__()
+        
+        self.user_emb = torch.nn.Embedding(num_users, hidden_channels)
+        torch.nn.init.xavier_uniform_(self.user_emb.weight)
+        
+        # GNN with Jumping Knowledge
+        self.gnn = GNN(
+            hidden_channels, 
+            dropout=dropout, 
+            use_bn=use_bn, 
+            num_layers=num_gnn_layers,
+            jk_mode=jk_mode  # Pass JK mode
+        )
+        self.gnn = to_hetero(self.gnn, metadata, aggr=AGGREGATION)
+        
+        self.classifier = Classifier(hidden_channels, dropout=dropout * 0.5)
+
+    def forward(self, data):
+        user_emb = self.user_emb(data['user'].n_id)
+        
+        x_dict = {
+            'user': user_emb,
+            'movie': data['movie'].x,
+        }
+        
+        x_dict = self.gnn(x_dict, data.edge_index_dict)
+        
+        pred = self.classifier(
+            x_dict['user'],
+            x_dict['movie'],
+            data['user', 'rates', 'movie'].edge_label_index
+        )
+        return pred
+
+
+
+
+
+
