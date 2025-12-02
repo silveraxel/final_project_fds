@@ -55,4 +55,9 @@ DEFAULT_USE_BN = True
 
 # Specify if using movielens TAGS as a feature of the movie or a new edge between user and movie
 
-DEFAULT_TAG_AS_EDGE = True
+DEFAULT_TAG_AS_EDGE = False
+
+#Specify modality of the software (Training or Inference)
+
+DEFAULT_MODALITY = 'training'
+DEFAULT_MODEL_PATH = './best_model.pt'

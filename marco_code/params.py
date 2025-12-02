@@ -3,10 +3,11 @@ import argparse
 
 # Architectural hyperparameters
 
-DEFAULT_HIDDEN_CHANNELS = 64        
+DEFAULT_HIDDEN_CHANNELS = 128        
 DEFAULT_DROPOUT = 0.5               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
-DEFAULT_NUM_GNN_LAYERS = 2           
+DEFAULT_NUM_GNN_LAYERS = 3           
+DEFAULT_NUM_MLP_LAYERS = 3
 
 # Training Parameters
 DEFAULT_LEARNING_RATE = 0.001        
@@ -16,8 +17,9 @@ DEFAULT_EARLY_STOPPING_PATIENCE = 100
 
 # Data Loading 
 DEFAULT_BATCH_SIZE = 256           
-DEFAULT_NUM_NEIGHBORS = [15, 10] 
+DEFAULT_NUM_NEIGHBORS = [40, 20, 10] 
 DEFAULT_NEG_SAMPLING_RATIO = 3.0
+DEFAULT_NEG_SAMPLING = 'triplet' #Options: 'uniform', 'triplet'
 
 # Data Split
 DEFAULT_NUM_VAL = 0.10
@@ -29,8 +31,7 @@ DEFAULT_LR_SCHEDULER_FACTOR = 0.5
 DEFAULT_LR_SCHEDULER_PATIENCE = 10
 
 # Gradient Clipping
-#USE_GRADIENT_CLIPPING = True
-DEFAULT_USE_GRADIENT_CLIPPING = False
+DEFAULT_USE_GRADIENT_CLIPPING = True
 DEFAULT_GRAD_CLIP_VALUE = 1.0
 
 #Embedding Regularization
@@ -48,10 +49,12 @@ DEFAULT_USE_BN = True
 
 # Specify if using movielens TAGS as a feature of the movie or a new edge between user and movie
 
-DEFAULT_TAG_AS_EDGE = True
+DEFAULT_TAG_AS_EDGE = False
 
+#Specify modality of the software (Training or Inference)
 
-
+DEFAULT_MODALITY = 'training'
+DEFAULT_MODEL_PATH = './best_model.pt'
 
 
 def parse_arguments():
@@ -62,7 +65,21 @@ def parse_arguments():
         description='Graph Neural Network for Recommendation System',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
+    script_group = parser.add_argument_group('Script modalities')
+    script_group.add_argument(
+        '--modality', 
+        type=str, 
+        default=DEFAULT_MODALITY,
+        choices=['training','inference'],
+        help='Modality of the software.Training for training a model, both from scratch or finetuning and inference for using for inference task'
+    )
+    script_group.add_argument(
+        '--model_path', 
+        type=str, 
+        default=DEFAULT_MODEL_PATH,
+        help='Filepath of the model to be loaded or created'
+    )
+   
     # Model Architecture
     model_group = parser.add_argument_group('Model Architecture')
     model_group.add_argument(
@@ -90,6 +107,13 @@ def parse_arguments():
         default=DEFAULT_NUM_GNN_LAYERS,
         help='Number of GNN layers in the model'
     )
+    model_group.add_argument(
+        '--num-mlp-layers', 
+        type=int, 
+        default=DEFAULT_NUM_MLP_LAYERS,
+        help='Number of GNN layers in the model'
+    )
+
     model_group.add_argument(
         '--jk-mode', 
         type=str, 
@@ -164,6 +188,13 @@ def parse_arguments():
         default=DEFAULT_NEG_SAMPLING_RATIO,
         help='Ratio of negative samples to positive samples'
     )
+    data_group.add_argument(
+        '--neg-sampling', 
+        type=str, 
+        default=DEFAULT_NEG_SAMPLING,
+        help='How to generate negative samples to positive samples'
+    )
+
     data_group.add_argument(
         '--dirname-movielens', 
         type=str, 
@@ -262,6 +293,7 @@ HIDDEN_CHANNELS = args.hidden_channels
 DROPOUT = args.dropout
 AGGREGATION = args.aggregation
 NUM_GNN_LAYERS = args.num_gnn_layers
+NUM_MLP_LAYERS = args.num_mlp_layers
 LEARNING_RATE = args.learning_rate
 WEIGHT_DECAY = args.weight_decay
 NUM_EPOCHS = args.num_epochs
@@ -269,6 +301,7 @@ EARLY_STOPPING_PATIENCE = args.early_stopping_patience
 BATCH_SIZE = args.batch_size
 NUM_NEIGHBORS = args.num_neighbors
 NEG_SAMPLING_RATIO = args.neg_sampling_ratio
+NEG_SAMPLING = args.neg_sampling
 NUM_VAL = args.num_val
 NUM_TEST = args.num_test
 USE_LR_SCHEDULER = args.use_lr_scheduler
@@ -281,13 +314,16 @@ JK_MODE = args.jk_mode
 DIRNAME_MOVIELENS = args.dirname_movielens
 USE_BN = args.use_bn
 TAG_AS_EDGE = args.tag_as_edge
-    
+MODALITY = args.modality
+MODEL_PATH = args.model_path
+
 # Print all parameters
 print("Configuration:")
 print(f"  Hidden Channels: {HIDDEN_CHANNELS}")
 print(f"  Dropout: {DROPOUT}")
 print(f"  Aggregation: {AGGREGATION}")
 print(f"  Num GNN Layers: {NUM_GNN_LAYERS}")
+print(f"  Num MLP Layers: {NUM_MLP_LAYERS}")
 print(f"  Learning Rate: {LEARNING_RATE}")
 print(f"  Weight Decay: {WEIGHT_DECAY}")
 print(f"  Num Epochs: {NUM_EPOCHS}")
@@ -307,3 +343,4 @@ print(f"  JK Mode: {JK_MODE}")
 print(f"  MovieLens Directory: {DIRNAME_MOVIELENS}")
 print(f"  Use Batch Normalization: {USE_BN}")
 print(f"  Tag as Edge: {TAG_AS_EDGE}")
+print(f"  Mode of use is :{MODALITY})")

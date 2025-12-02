@@ -375,6 +375,8 @@ class HeteroEdgeAwareGNN(torch.nn.Module):
         return x_dict
 
 """
+
+""""
 class Classifier(torch.nn.Module):
     def __init__(self, hidden_channels, dropout=0.0):
         super().__init__()
@@ -399,10 +401,59 @@ class Classifier(torch.nn.Module):
         x = x + self.block1(x)  # Residual connection
         return self.output(x).squeeze(-1)
 
+"""
+
+class Classifier(torch.nn.Module):
+    def __init__(self, hidden_channels, dropout=DEFAULT_DROPOUT, num_layers=DEFAULT_NUM_MLP_LAYERS):
+        """
+        Args:
+            hidden_channels: Hidden dimension
+            dropout: Dropout rate
+            num_layers: Number of MLP layers (minimum 1)
+        """
+        super().__init__()
+        
+        input_dim = hidden_channels * 2
+        self.num_layers = max(1, num_layers)  # At least 1 layer
+        
+        layers = []
+        
+        # First layer: input projection
+        layers.append(torch.nn.Linear(input_dim, hidden_channels))
+        layers.append(torch.nn.BatchNorm1d(hidden_channels))
+        layers.append(torch.nn.ReLU())
+        layers.append(torch.nn.Dropout(dropout))
+        
+        # Hidden layers (if num_layers > 2)
+        for i in range(1, self.num_layers - 1):
+            # Progressively reduce dimensions
+            in_dim = hidden_channels // (2 ** (i - 1))
+            out_dim = hidden_channels // (2 ** i)
+            
+            layers.append(torch.nn.Linear(in_dim, out_dim))
+            layers.append(torch.nn.BatchNorm1d(out_dim))
+            layers.append(torch.nn.ReLU())
+            layers.append(torch.nn.Dropout(dropout))
+        
+        # Output layer
+        final_hidden_dim = hidden_channels // (2 ** (self.num_layers - 2)) if self.num_layers > 1 else hidden_channels
+        layers.append(torch.nn.Linear(final_hidden_dim, 1))
+        
+        self.mlp = torch.nn.Sequential(*layers)
+    
+    def forward(self, x_user, x_movie, edge_label_index):
+        edge_feat_user = x_user[edge_label_index[0]]
+        edge_feat_movie = x_movie[edge_label_index[1]]
+        combined = torch.cat([edge_feat_user, edge_feat_movie], dim=-1)
+        return self.mlp(combined).squeeze(-1)
+
+
+
 
 class Model(torch.nn.Module):
-    def __init__(self, hidden_channels, num_users, metadata, dropout=0.0, use_bn=False, 
-                 num_gnn_layers=3, jk_mode='cat'):
+    def __init__(self, hidden_channels, num_users, metadata,
+                 dropout=0.0, use_bn=DEFAULT_USE_BN, num_gnn_layers=DEFAULT_NUM_GNN_LAYERS, num_mlp_layers=DEFAULT_NUM_MLP_LAYERS, jk_mode=DEFAULT_JK_MODE):
+
         super().__init__()
         
         self.user_emb = torch.nn.Embedding(num_users, hidden_channels)
@@ -414,11 +465,15 @@ class Model(torch.nn.Module):
             dropout=dropout, 
             use_bn=use_bn, 
             num_layers=num_gnn_layers,
-            jk_mode=jk_mode  # Pass JK mode
+            jk_mode=jk_mode
         )
         self.gnn = to_hetero(self.gnn, metadata, aggr=AGGREGATION)
         
-        self.classifier = Classifier(hidden_channels, dropout=dropout * 0.5)
+        self.classifier = Classifier(
+            hidden_channels, 
+            dropout=dropout,
+            num_layers=num_mlp_layers
+        )
 
     def forward(self, data):
         user_emb = self.user_emb(data['user'].n_id)
@@ -436,6 +491,8 @@ class Model(torch.nn.Module):
             data['user', 'rates', 'movie'].edge_label_index
         )
         return pred
+
+
 
 #TOBEFIXED
 """

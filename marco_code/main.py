@@ -156,8 +156,10 @@ model = Model(
     dropout=DROPOUT,
     use_bn=USE_BN,
     num_gnn_layers=NUM_GNN_LAYERS,
-    jk_mode='cat'
+    num_mlp_layers=NUM_MLP_LAYERS,
+    jk_mode=JK_MODE
 ).to(device)
+
 
 #TOBEFIXED
 """
@@ -197,6 +199,7 @@ train_loader = LinkNeighborLoader(
     data=train_data,
     num_neighbors=NUM_NEIGHBORS,
     neg_sampling_ratio=NEG_SAMPLING_RATIO,
+    neg_sampling = NEG_SAMPLING,
     edge_label_index=(('user', 'rates', 'movie'), 
                       train_data['user', 'rates', 'movie'].edge_label_index),
     edge_label=train_data['user', 'rates', 'movie'].edge_label,
@@ -285,218 +288,216 @@ def test(loader):
 # TRAINING LOOP
 # ============================================================================
 
+if MODALITY == 'Training':
+    best_val_rmse = float('inf')
+    best_train_rmse = float('inf')
+    patience_counter = 0
 
-best_val_rmse = float('inf')
-best_train_rmse = float('inf')
-patience_counter = 0
+    for epoch in range(1, NUM_EPOCHS + 1):
+        loss = train()
+        train_rmse = test(train_loader)
+        val_rmse = test(val_loader)
+        
+        train_val_gap = val_rmse - train_rmse
+        
+        if USE_LR_SCHEDULER:
+            scheduler.step(val_rmse)
+        
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+            best_train_rmse = train_rmse
+            patience_counter = 0
+            torch.save(model.state_dict(), MODEL_PATH)
+            improvement_marker = "✓"
+        else:
+            patience_counter += 1
+            improvement_marker = ""
+        
+        
+        print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, '
+            f'Train: {train_rmse:.4f}, Val: {val_rmse:.4f}, '
+            f'Gap: {train_val_gap:.4f}')
+        
+        if patience_counter >= EARLY_STOPPING_PATIENCE:
+            print(f'\n✓ Early stopping at epoch {epoch}')
+            break
 
-for epoch in range(1, NUM_EPOCHS + 1):
-    loss = train()
-    train_rmse = test(train_loader)
-    val_rmse = test(val_loader)
-    
-    train_val_gap = val_rmse - train_rmse
-    
-    if USE_LR_SCHEDULER:
-        scheduler.step(val_rmse)
-    
-    if val_rmse < best_val_rmse:
-        best_val_rmse = val_rmse
-        best_train_rmse = train_rmse
-        patience_counter = 0
-        torch.save(model.state_dict(), 'best_model.pt')
-        improvement_marker = "✓"
-    else:
-        patience_counter += 1
-        improvement_marker = ""
-    
-    
-    print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, '
-          f'Train: {train_rmse:.4f}, Val: {val_rmse:.4f}, '
-          f'Gap: {train_val_gap:.4f}')
-    
-    if patience_counter >= EARLY_STOPPING_PATIENCE:
-        print(f'\n✓ Early stopping at epoch {epoch}')
-        break
-
+elif MODALITY == 'inference':
 # Load best model
-model.load_state_dict(torch.load('best_model.pt'))
+    model.load_state_dict(torch.load(MODEL_PATH))
+
+    movies_df = pd.read_csv(movie_path)
+    reverse_user_mapping = {v: k for k, v in user_mapping.items()}
+    reverse_movie_mapping = {v: k for k, v in movie_mapping.items()}
 
 
-
-# ============================================================================
-# INFERENCE FUNCTIONS
-# ============================================================================
-
-movies_df = pd.read_csv(movie_path)
-reverse_user_mapping = {v: k for k, v in user_mapping.items()}
-reverse_movie_mapping = {v: k for k, v in movie_mapping.items()}
-
-
-@torch.no_grad()
-def predict_rating(user_id, movie_id):
-    """Predict rating for a specific user-movie pair"""
-    model.eval()
-    
-    if user_id not in user_mapping or movie_id not in movie_mapping:
-        return None
-    
-    user_idx = user_mapping[user_id]
-    movie_idx = movie_mapping[movie_id]
-    
-    edge_label_index = torch.tensor([[user_idx], [movie_idx]], device=device)
-    
-    loader = LinkNeighborLoader(
-        data=data,
-        num_neighbors=NUM_NEIGHBORS,
-        edge_label_index=(('user', 'rates', 'movie'), edge_label_index),
-        batch_size=1,
-        shuffle=False,
-    )
-    
-    for batch in loader:
-        batch = batch.to(device)
-        pred = model(batch)
-        return pred.item()
-
-
-@torch.no_grad()
-def evaluate_sample_predictions(n_users=10, n_samples_per_user=5):
-    """Sample n_users, predict n_samples per user, and plot prediction errors"""
-    model.eval()
-    
-    print(f"\n{'='*80}")
-    print(f"SAMPLE PREDICTIONS - {n_users} Users x {n_samples_per_user} Movies Each")
-    print(f"{'='*80}\n")
-    
-    test_edges = test_data['user', 'rates', 'movie'].edge_label_index
-    test_labels = test_data['user', 'rates', 'movie'].edge_label
-    
-    # Group test edges by user
-    user_edges = {}
-    for i in range(test_edges.size(1)):
-        user_idx = test_edges[0, i].item()
-        if user_idx not in user_edges:
-            user_edges[user_idx] = []
-        user_edges[user_idx].append(i)
-    
-    eligible_users = [u for u, edges in user_edges.items() if len(edges) >= n_samples_per_user]
-    if len(eligible_users) < n_users:
-        print(f"Warning: Only {len(eligible_users)} users have {n_samples_per_user}+ ratings")
-        n_users = len(eligible_users)
-    
-    sampled_users = np.random.choice(eligible_users, size=n_users, replace=False)
-    
-    all_errors = []
-    all_actual = []
-    all_predicted = []
-    user_labels = []
-    
-    for user_idx in sampled_users:
-        user_id = reverse_user_mapping[user_idx]
+    @torch.no_grad()
+    def predict_rating(user_id, movie_id):
+        """Predict rating for a specific user-movie pair"""
+        model.eval()
         
-        available_edges = user_edges[user_idx]
-        sampled_edge_indices = np.random.choice(available_edges, size=n_samples_per_user, replace=False)
+        if user_id not in user_mapping or movie_id not in movie_mapping:
+            return None
         
-        print(f"\nUser {user_id}:")
-        user_errors = []
+        user_idx = user_mapping[user_id]
+        movie_idx = movie_mapping[movie_id]
         
-        for edge_idx in sampled_edge_indices:
-            movie_idx = test_edges[1, edge_idx].item()
-            actual_rating = test_labels[edge_idx].item()
-            
-            movie_id = reverse_movie_mapping[movie_idx]
-            movie_title = movies_df[movies_df['movieId'] == movie_id]['title'].values[0]
-            
-            predicted_rating = predict_rating(user_id, movie_id)
-            
-            error = abs(predicted_rating - actual_rating)
-            user_errors.append(error)
-            all_errors.append(error)
-            all_actual.append(actual_rating)
-            all_predicted.append(predicted_rating)
-            
-            print(f"  {movie_title[:50]:50s} | Actual: {actual_rating:.1f} | Pred: {predicted_rating:.2f} | Error: {error:.2f}")
+        edge_label_index = torch.tensor([[user_idx], [movie_idx]], device=device)
         
-        avg_user_error = np.mean(user_errors)
-        print(f"  → Average Error for User {user_id}: {avg_user_error:.3f}")
-        user_labels.extend([f"User {user_id}"] * n_samples_per_user)
-    
-    all_errors = np.array(all_errors)
-    all_actual = np.array(all_actual)
-    all_predicted = np.array(all_predicted)
-    
-    print(f"\n{'='*80}")
-    print("OVERALL STATISTICS")
-    print(f"{'='*80}")
-    print(f"Total Predictions: {len(all_errors)}")
-    print(f"Mean Absolute Error (MAE): {np.mean(all_errors):.3f}")
-    print(f"Std of Errors: {np.std(all_errors):.3f}")
-    print(f"Min Error: {np.min(all_errors):.3f}")
-    print(f"Max Error: {np.max(all_errors):.3f}")
-    print(f"RMSE: {np.sqrt(np.mean(all_errors**2)):.3f}")
-    
-    # Create visualization
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle(f'Prediction Error Analysis ({n_users} Users × {n_samples_per_user} Predictions)', 
-                 fontsize=14, fontweight='bold')
-    
-    axes[0, 0].hist(all_errors, bins=30, edgecolor='black', alpha=0.7, color='skyblue')
-    axes[0, 0].axvline(np.mean(all_errors), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(all_errors):.3f}')
-    axes[0, 0].set_xlabel('Absolute Error', fontsize=11)
-    axes[0, 0].set_ylabel('Frequency', fontsize=11)
-    axes[0, 0].set_title('Distribution of Prediction Errors', fontsize=12, fontweight='bold')
-    axes[0, 0].legend()
-    axes[0, 0].grid(True, alpha=0.3)
-    
-    axes[0, 1].scatter(all_actual, all_predicted, alpha=0.6, s=50, color='coral')
-    axes[0, 1].plot([0, 5], [0, 5], 'k--', linewidth=2, label='Perfect Prediction')
-    axes[0, 1].set_xlabel('Actual Rating', fontsize=11)
-    axes[0, 1].set_ylabel('Predicted Rating', fontsize=11)
-    axes[0, 1].set_title('Actual vs Predicted Ratings', fontsize=12, fontweight='bold')
-    axes[0, 1].legend()
-    axes[0, 1].grid(True, alpha=0.3)
-    axes[0, 1].set_xlim(0, 5.5)
-    axes[0, 1].set_ylim(0, 5.5)
-    
-    user_error_data = []
-    user_names = []
-    for user_idx in sampled_users:
-        user_id = reverse_user_mapping[user_idx]
-        user_mask = np.array([label == f"User {user_id}" for label in user_labels])
-        user_error_data.append(all_errors[user_mask])
-        user_names.append(f"U{user_id}")
-    
-    bp = axes[1, 0].boxplot(user_error_data, labels=user_names, patch_artist=True)
-    for patch in bp['boxes']:
-        patch.set_facecolor('lightgreen')
-    axes[1, 0].set_xlabel('User ID', fontsize=11)
-    axes[1, 0].set_ylabel('Absolute Error', fontsize=11)
-    axes[1, 0].set_title('Error Distribution per User', fontsize=12, fontweight='bold')
-    axes[1, 0].grid(True, alpha=0.3, axis='y')
-    axes[1, 0].tick_params(axis='x', rotation=45)
-    
-    axes[1, 1].scatter(all_actual, all_errors, alpha=0.6, s=50, color='mediumpurple')
-    axes[1, 1].axhline(np.mean(all_errors), color='red', linestyle='--', linewidth=2, label=f'Mean Error: {np.mean(all_errors):.3f}')
-    axes[1, 1].set_xlabel('Actual Rating', fontsize=11)
-    axes[1, 1].set_ylabel('Absolute Error', fontsize=11)
-    axes[1, 1].set_title('Error vs Actual Rating', fontsize=12, fontweight='bold')
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
-    axes[1, 1].set_xlim(0, 5.5)
-    
-    plt.tight_layout()
-    
-    plot_filename = 'prediction_error_analysis.png'
-    plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
-    print(f"\n✓ Plot saved as: {plot_filename}")
-    
-    plt.show()
-    
-    print(f"{'='*80}\n")
-    
-    return all_errors, all_actual, all_predicted
+        loader = LinkNeighborLoader(
+            data=data,
+            num_neighbors=NUM_NEIGHBORS,
+            edge_label_index=(('user', 'rates', 'movie'), edge_label_index),
+            batch_size=1,
+            shuffle=False,
+        )
+        
+        for batch in loader:
+            batch = batch.to(device)
+            pred = model(batch)
+            return pred.item()
+
+else:
+    print('Internal error no valid modality has been defined. Exiting the script')
+    exit(0)
+
+    @torch.no_grad()
+    def evaluate_sample_predictions(n_users=10, n_samples_per_user=5):
+        """Sample n_users, predict n_samples per user, and plot prediction errors"""
+        model.eval()
+        
+        print(f"\n{'='*80}")
+        print(f"SAMPLE PREDICTIONS - {n_users} Users x {n_samples_per_user} Movies Each")
+        print(f"{'='*80}\n")
+        
+        test_edges = test_data['user', 'rates', 'movie'].edge_label_index
+        test_labels = test_data['user', 'rates', 'movie'].edge_label
+        
+        # Group test edges by user
+        user_edges = {}
+        for i in range(test_edges.size(1)):
+            user_idx = test_edges[0, i].item()
+            if user_idx not in user_edges:
+                user_edges[user_idx] = []
+            user_edges[user_idx].append(i)
+        
+        eligible_users = [u for u, edges in user_edges.items() if len(edges) >= n_samples_per_user]
+        if len(eligible_users) < n_users:
+            print(f"Warning: Only {len(eligible_users)} users have {n_samples_per_user}+ ratings")
+            n_users = len(eligible_users)
+        
+        sampled_users = np.random.choice(eligible_users, size=n_users, replace=False)
+        
+        all_errors = []
+        all_actual = []
+        all_predicted = []
+        user_labels = []
+        
+        for user_idx in sampled_users:
+            user_id = reverse_user_mapping[user_idx]
+            
+            available_edges = user_edges[user_idx]
+            sampled_edge_indices = np.random.choice(available_edges, size=n_samples_per_user, replace=False)
+            
+            print(f"\nUser {user_id}:")
+            user_errors = []
+            
+            for edge_idx in sampled_edge_indices:
+                movie_idx = test_edges[1, edge_idx].item()
+                actual_rating = test_labels[edge_idx].item()
+                
+                movie_id = reverse_movie_mapping[movie_idx]
+                movie_title = movies_df[movies_df['movieId'] == movie_id]['title'].values[0]
+                
+                predicted_rating = predict_rating(user_id, movie_id)
+                
+                error = abs(predicted_rating - actual_rating)
+                user_errors.append(error)
+                all_errors.append(error)
+                all_actual.append(actual_rating)
+                all_predicted.append(predicted_rating)
+                
+                print(f"  {movie_title[:50]:50s} | Actual: {actual_rating:.1f} | Pred: {predicted_rating:.2f} | Error: {error:.2f}")
+            
+            avg_user_error = np.mean(user_errors)
+            print(f"  → Average Error for User {user_id}: {avg_user_error:.3f}")
+            user_labels.extend([f"User {user_id}"] * n_samples_per_user)
+        
+        all_errors = np.array(all_errors)
+        all_actual = np.array(all_actual)
+        all_predicted = np.array(all_predicted)
+        
+        print(f"\n{'='*80}")
+        print("OVERALL STATISTICS")
+        print(f"{'='*80}")
+        print(f"Total Predictions: {len(all_errors)}")
+        print(f"Mean Absolute Error (MAE): {np.mean(all_errors):.3f}")
+        print(f"Std of Errors: {np.std(all_errors):.3f}")
+        print(f"Min Error: {np.min(all_errors):.3f}")
+        print(f"Max Error: {np.max(all_errors):.3f}")
+        print(f"RMSE: {np.sqrt(np.mean(all_errors**2)):.3f}")
+        
+        # Create visualization
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(f'Prediction Error Analysis ({n_users} Users × {n_samples_per_user} Predictions)', 
+                    fontsize=14, fontweight='bold')
+        
+        axes[0, 0].hist(all_errors, bins=30, edgecolor='black', alpha=0.7, color='skyblue')
+        axes[0, 0].axvline(np.mean(all_errors), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(all_errors):.3f}')
+        axes[0, 0].set_xlabel('Absolute Error', fontsize=11)
+        axes[0, 0].set_ylabel('Frequency', fontsize=11)
+        axes[0, 0].set_title('Distribution of Prediction Errors', fontsize=12, fontweight='bold')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        axes[0, 1].scatter(all_actual, all_predicted, alpha=0.6, s=50, color='coral')
+        axes[0, 1].plot([0, 5], [0, 5], 'k--', linewidth=2, label='Perfect Prediction')
+        axes[0, 1].set_xlabel('Actual Rating', fontsize=11)
+        axes[0, 1].set_ylabel('Predicted Rating', fontsize=11)
+        axes[0, 1].set_title('Actual vs Predicted Ratings', fontsize=12, fontweight='bold')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 1].set_xlim(0, 5.5)
+        axes[0, 1].set_ylim(0, 5.5)
+        
+        user_error_data = []
+        user_names = []
+        for user_idx in sampled_users:
+            user_id = reverse_user_mapping[user_idx]
+            user_mask = np.array([label == f"User {user_id}" for label in user_labels])
+            user_error_data.append(all_errors[user_mask])
+            user_names.append(f"U{user_id}")
+        
+        bp = axes[1, 0].boxplot(user_error_data, labels=user_names, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('lightgreen')
+        axes[1, 0].set_xlabel('User ID', fontsize=11)
+        axes[1, 0].set_ylabel('Absolute Error', fontsize=11)
+        axes[1, 0].set_title('Error Distribution per User', fontsize=12, fontweight='bold')
+        axes[1, 0].grid(True, alpha=0.3, axis='y')
+        axes[1, 0].tick_params(axis='x', rotation=45)
+        
+        axes[1, 1].scatter(all_actual, all_errors, alpha=0.6, s=50, color='mediumpurple')
+        axes[1, 1].axhline(np.mean(all_errors), color='red', linestyle='--', linewidth=2, label=f'Mean Error: {np.mean(all_errors):.3f}')
+        axes[1, 1].set_xlabel('Actual Rating', fontsize=11)
+        axes[1, 1].set_ylabel('Absolute Error', fontsize=11)
+        axes[1, 1].set_title('Error vs Actual Rating', fontsize=12, fontweight='bold')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True, alpha=0.3)
+        axes[1, 1].set_xlim(0, 5.5)
+        
+        plt.tight_layout()
+        
+        plot_filename = 'prediction_error_analysis.png'
+        plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+        print(f"\n✓ Plot saved as: {plot_filename}")
+        
+        plt.show()
+        
+        print(f"{'='*80}\n")
+        
+        return all_errors, all_actual, all_predicted
 
 
-# Run sample predictions with visualization
-errors, actual, predicted = evaluate_sample_predictions(n_users=10, n_samples_per_user=5)
+    # Run sample predictions with visualization
+    errors, actual, predicted = evaluate_sample_predictions(n_users=10, n_samples_per_user=5)
