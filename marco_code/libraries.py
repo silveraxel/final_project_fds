@@ -109,10 +109,17 @@ def load_edge_csv_tags(path, src_index_col, src_mapping, dst_index_col, dst_mapp
 
 
 class SequenceEncoder:
-    def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
+    def __init__(self, model_name='all-MiniLM-L6-v2', device=None, local_path=DEFAULT_EMBEDDER_PATH):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
-        self.model = SentenceTransformer(model_name, device=device)
+        try:
+            self.model = SentenceTransformer(local_path+model_name)
+            print('Loaded local embedder')
+        except:
+            print('Not found a local embedder, downloading one and saving it in'+local_path)
+            self.model = SentenceTransformer(model_name, device=device)
+            self.model.save(local_path+model_name) 
+            print(f"Model '{model_name}' saved locally to '{local_path}'")
 
     @torch.no_grad()
     def __call__(self, df):
@@ -147,10 +154,18 @@ class IdentityEncoder:
 
 
 class AggregatedTagEncoder:
-    def __init__(self, tags_path, movie_mapping, model_name='all-MiniLM-L6-v2', device=None):
+    def __init__(self, tags_path, movie_mapping, model_name='all-MiniLM-L6-v2', device=None,local_path=DEFAULT_EMBEDDER_PATH):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
-        self.model = SentenceTransformer(model_name, device=device)
+        try:
+            self.model = SentenceTransformer(local_path+model_name)
+            print('Loaded local embedder')
+        except:
+            print('Not found a local embedder, downloading one and saving it in'+local_path)
+            self.model = SentenceTransformer(model_name, device=device)
+            self.model.save(local_path+model_name) 
+            print(f"Model '{model_name}' saved locally to '{local_path}'")
+        #self.model = SentenceTransformer(model_name, device=device)
         self.tags_path = tags_path
         self.movie_mapping = movie_mapping
     

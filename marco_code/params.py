@@ -54,7 +54,11 @@ DEFAULT_TAG_AS_EDGE = False
 #Specify modality of the software (Training or Inference)
 
 DEFAULT_MODALITY = 'training'
+
+#Specify where are the nn model and, if any, the local embedder
+
 DEFAULT_MODEL_PATH = './best_model.pt'
+DEFAULT_EMBEDDER_PATH = '/tmp/'
 
 
 def parse_arguments():
@@ -78,6 +82,13 @@ def parse_arguments():
         type=str, 
         default=DEFAULT_MODEL_PATH,
         help='Filepath of the model to be loaded or created'
+    )
+    
+    script_group.add_argument(
+        '--embedder_path', 
+        type=str, 
+        default=DEFAULT_EMBEDDER_PATH,
+        help='Filepath of the embedder to be loaded or created'
     )
    
     # Model Architecture
@@ -316,6 +327,7 @@ USE_BN = args.use_bn
 TAG_AS_EDGE = args.tag_as_edge
 MODALITY = args.modality
 MODEL_PATH = args.model_path
+EMBEDDER_PATH = args.embedder_path
 
 # Print all parameters
 print("Configuration:")
@@ -341,6 +353,8 @@ print(f"  Gradient Clip Value: {GRAD_CLIP_VALUE}")
 print(f"  Embedding Regularization: {EMB_REG}")
 print(f"  JK Mode: {JK_MODE}")
 print(f"  MovieLens Directory: {DIRNAME_MOVIELENS}")
+print(f"  Embedder Directory: {EMBEDDER_PATH}")
 print(f"  Use Batch Normalization: {USE_BN}")
 print(f"  Tag as Edge: {TAG_AS_EDGE}")
-print(f"  Mode of use is :{MODALITY})")
+print(f"  Mode of use is :{MODALITY}")
+

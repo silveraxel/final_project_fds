@@ -60,4 +60,8 @@ DEFAULT_TAG_AS_EDGE = False
 #Specify modality of the software (Training or Inference)
 
 DEFAULT_MODALITY = 'training'
+
+#Specify where are the nn model and, if any, the local embedder
+
 DEFAULT_MODEL_PATH = './best_model.pt'
+DEFAULT_EMBEDDER_PATH = '/tmp/'
