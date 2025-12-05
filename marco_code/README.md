@@ -1,9 +1,16 @@
+##INSTALLATION
+
+Install torch version compatible with CUDA
+The tested version (corresponding to the available GPU) used CUDA 12.1 (actually 12.2 but same driver as 12.1)
+'pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121'
+
+After that, use 'pip -r requirements.txt'
+
+
+## USE OF THE SCRIPT
 Example of use of the main script
 
-
 python main.py --hidden-channels 128 --num-gnn-layers 3 --num-neighbors 40 20 10 
-
-
 
 
 Here follows the parameters that can be override and their default values. If not specified, the default values is used
