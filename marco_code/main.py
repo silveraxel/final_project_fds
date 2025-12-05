@@ -7,13 +7,13 @@ if MODALITY == 'training':
     patience_counter = 0
 
 
-    try:
+    if LOAD_MODEL:
         model_weights = torch.load(MODEL_PATH)
         model.load_state_dict(model_weights)
-        print('Loaded the model '+str(MODEL_PATH))
-    except:
-        print('Not found a model, starting from scratch and saving it in ' + str(MODEL_PATH))
-
+        print('Loading the model '+str(MODEL_PATH))
+    else:
+        print('Creating/Overwriting the model '+str(MODEL_PATH))
+    
     for epoch in range(1, NUM_EPOCHS + 1):
         loss = train()
         train_rmse = test(train_loader)

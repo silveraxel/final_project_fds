@@ -7,17 +7,17 @@ DEFAULT_HIDDEN_CHANNELS = 128
 DEFAULT_DROPOUT = 0.3               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
 DEFAULT_NUM_GNN_LAYERS = 3           
-DEFAULT_NUM_MLP_LAYERS = 3
+DEFAULT_NUM_MLP_LAYERS = 2
 
 # Training Parameters
 DEFAULT_LEARNING_RATE = 0.001        
 DEFAULT_WEIGHT_DECAY = 5e-4          
 DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 100 
+DEFAULT_EARLY_STOPPING_PATIENCE = 50 
 
 # Data Loading 
-DEFAULT_BATCH_SIZE = 256           
-DEFAULT_NUM_NEIGHBORS = [40, 20, 10] 
+DEFAULT_BATCH_SIZE = 128          
+DEFAULT_NUM_NEIGHBORS = [30, 10, 5] 
 DEFAULT_NEG_SAMPLING_RATIO = 3.0
 DEFAULT_NEG_SAMPLING = 'triplet' #Options: 'uniform', 'triplet'
 
@@ -31,11 +31,11 @@ DEFAULT_LR_SCHEDULER_FACTOR = 0.5
 DEFAULT_LR_SCHEDULER_PATIENCE = 10
 
 # Gradient Clipping
-DEFAULT_USE_GRADIENT_CLIPPING = True
+DEFAULT_USE_GRADIENT_CLIPPING = False
 DEFAULT_GRAD_CLIP_VALUE = 1.0
 
 #Embedding Regularization
-DEFAULT_EMB_REG = 5e-4
+DEFAULT_EMB_REG = 1e-4
 
 # Specify which type of Knowledge Jump must be used
 DEFAULT_JK_MODE = 'max'  # Options: 'cat', 'max', 'lstm'
@@ -58,6 +58,7 @@ DEFAULT_MODALITY = 'training'
 #Specify where are the nn model and, if any, the local embedder
 
 DEFAULT_MODEL_PATH = './best_model.pt'
+DEFAULT_LOAD_MODEL = False
 DEFAULT_EMBEDDER_PATH = '/tmp/'
 
 
@@ -135,8 +136,14 @@ def parse_arguments():
     model_group.add_argument(
         '--use-bn', 
         action='store_true', 
-        default=True,
+        default=DEFAULT_USE_BN,
         help='Use batch normalization'
+    )
+    model_group.add_argument(
+        '--load_model', 
+        action='store_true', 
+        default=DEFAULT_LOAD_MODEL,
+        help='Load an already trained model'
     )
     model_group.add_argument(
         '--no-bn', 
@@ -215,7 +222,7 @@ def parse_arguments():
     data_group.add_argument(
         '--tag-as-edge', 
         action='store_true', 
-        default=True,
+        default=False,
         help='Use tags as edges in the graph'
     )
     data_group.add_argument(
@@ -272,9 +279,16 @@ def parse_arguments():
     grad_group.add_argument(
         '--use-gradient-clipping', 
         action='store_true', 
-        default=False,
+        default=DEFAULT_USE_GRADIENT_CLIPPING,
         help='Use gradient clipping'
     )
+    grad_group.add_argument(
+        '--no-use-gradient-clipping', 
+        action='store_false', 
+        dest='use-gradient-clipping',
+        help='Disable gradient clipping'
+    )
+
     grad_group.add_argument(
         '--grad-clip-value', 
         type=float, 
@@ -328,6 +342,7 @@ TAG_AS_EDGE = args.tag_as_edge
 MODALITY = args.modality
 MODEL_PATH = args.model_path
 EMBEDDER_PATH = args.embedder_path
+LOAD_MODEL = args.load_model
 
 # Print all parameters
 print("Configuration:")
@@ -357,4 +372,6 @@ print(f"  Embedder Directory: {EMBEDDER_PATH}")
 print(f"  Use Batch Normalization: {USE_BN}")
 print(f"  Tag as Edge: {TAG_AS_EDGE}")
 print(f"  Mode of use is :{MODALITY}")
+print(f"  Model path is :{MODEL_PATH}")
+print(f"  Model Loading is :{LOAD_MODEL}")
 

@@ -6,13 +6,15 @@ The tested version (corresponding to the available GPU) used CUDA 12.1 (actually
 
 After that, use 'pip -r requirements.txt'
 
-
 ## USE OF THE SCRIPT
 Example of use of the main script
 
 python main.py --hidden-channels 128 --num-gnn-layers 3 --num-neighbors 40 20 10 
+In case you want to load an already trained model provide the flag --model-path $MODEL_PATH 
+e.g. python main.pt --model_path prova.pt
 
 
+## DEFAULT PARAMETERS
 Here follows the parameters that can be override and their default values. If not specified, the default values is used
 
 # Architectural hyperparameters
