@@ -4,7 +4,7 @@ import argparse
 # Architectural hyperparameters
 
 DEFAULT_HIDDEN_CHANNELS = 128        
-DEFAULT_DROPOUT = 0.5               
+DEFAULT_DROPOUT = 0.3               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
 DEFAULT_NUM_GNN_LAYERS = 3           
 DEFAULT_NUM_MLP_LAYERS = 3

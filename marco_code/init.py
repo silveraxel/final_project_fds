@@ -147,20 +147,6 @@ model = Model(
 ).to(device)
 
 
-
-#TOBEFIXED
-"""
-model = Model(
-    hidden_channels=HIDDEN_CHANNELS,
-    num_users=num_users,
-    metadata=train_data.metadata(),
-    dropout=DROPOUT,
-    use_bn=USE_BN,
-    num_gnn_layers=NUM_GNN_LAYERS,
-    use_edge_attr=TAG_AS_EDGE  # Only use edge attr if tags are edges
-).to(device)
-"""
-
 # Optimizer
 optimizer = torch.optim.Adam(
     model.parameters(), 

@@ -6,6 +6,14 @@ if MODALITY == 'training':
     best_train_rmse = float('inf')
     patience_counter = 0
 
+
+    try:
+        model_weights = torch.load(MODEL_PATH)
+        model.load_state_dict(model_weights)
+        print('Loaded the model '+str(MODEL_PATH))
+    except:
+        print('Not found a model, starting from scratch and saving it in ' + str(MODEL_PATH))
+
     for epoch in range(1, NUM_EPOCHS + 1):
         loss = train()
         train_rmse = test(train_loader)
@@ -45,7 +53,7 @@ elif MODALITY == 'inference':
 
 
     # Run sample predictions with visualization
-    errors, actual, predicted = evaluate_sample_predictions(movies_df, n_users=10, n_samples_per_user=5)
+    errors, actual, predicted = evaluate_sample_predictions(movies_df, n_users=100, n_samples_per_user=10)
 
 else:
     print('Internal error no valid modality has been defined. Exiting the script')
