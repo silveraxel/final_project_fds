@@ -14,7 +14,7 @@ from torch_geometric.nn import JumpingKnowledge
 from torch_geometric.nn import GATv2Conv
 
 from params import *
-
+import json
 
 
 
@@ -233,7 +233,9 @@ class TagEncoder:
         
         if input_dim != self.hidden_channels:
             print(f"Warning: Tag embedding dim ({input_dim}) != GNN hidden_channels ({self.hidden_channels}). Adding linear projection.")
-            self.projection = torch.nn.Linear(input_dim, self.hidden_channels)
+            #self.projection = torch.nn.Linear(input_dim, self.hidden_channels)
+            #TO BE TESTED
+            self.projection = torch.nn.Linear(input_dim, self.hidden_channels).to(self.device)
             torch.nn.init.xavier_uniform_(self.projection.weight)
         else:
             self.projection = None

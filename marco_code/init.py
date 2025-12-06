@@ -210,7 +210,16 @@ def train():
     model.train()
     total_loss = 0
     total_examples = 0
-    
+
+    #Loss definition
+    if LOSS_TYPE == 'L2':
+        criterion = torch.nn.MSELoss()
+    elif LOSS_TYPE == 'L1':
+        criterion =torch.nn.L1Loss()
+    else:
+        print('Not defined a loss function. Exiting the script')
+        exit(1)
+
     for batch in train_loader:
         batch = batch.to(device)
         optimizer.zero_grad()
@@ -219,7 +228,7 @@ def train():
         
         ground_truth = batch['user', 'rates', 'movie'].edge_label.squeeze().float()
         
-        loss = F.mse_loss(pred, ground_truth)
+        loss = criterion(pred,ground_truth)
         
         emb_reg = EMB_REG * model.user_emb.weight.norm(2)
         

@@ -4,7 +4,7 @@ import json
 
 # Architectural hyperparameters
 
-DEFAULT_HIDDEN_CHANNELS = 128        
+DEFAULT_HIDDEN_CHANNELS = 256        
 DEFAULT_DROPOUT = 0.5               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
 DEFAULT_NUM_GNN_LAYERS = 3           
@@ -12,14 +12,14 @@ DEFAULT_NUM_MLP_LAYERS = 3
 DEFAULT_ARCHITECTURE='SageConv' #Options: 'SageConv', 'Gatv2Conv'
 
 # Training Parameters     
-DEFAULT_LEARNING_RATE = 0.001        
+DEFAULT_LEARNING_RATE = 0.003        
 DEFAULT_WEIGHT_DECAY = 5e-4          
 DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 50 
+DEFAULT_EARLY_STOPPING_PATIENCE = 100 
 
 # Data Loading 
 DEFAULT_BATCH_SIZE = 512          
-DEFAULT_NUM_NEIGHBORS = [30, 10, 5] 
+DEFAULT_NUM_NEIGHBORS = [30, 20, 10] 
 DEFAULT_NEG_SAMPLING_RATIO = 3.0
 DEFAULT_NEG_SAMPLING = 'triplet' #Options: 'uniform', 'triplet'
 
@@ -30,7 +30,10 @@ DEFAULT_NUM_TEST = 0.10
 # Learning Rate Scheduler
 DEFAULT_USE_LR_SCHEDULER = True
 DEFAULT_LR_SCHEDULER_FACTOR = 0.5
-DEFAULT_LR_SCHEDULER_PATIENCE = 10
+DEFAULT_LR_SCHEDULER_PATIENCE = 20
+
+#Type of Loss function
+DEFAULT_LOSS = 'L2' # Options: 'L2', 'L1'
 
 # Gradient Clipping
 DEFAULT_USE_GRADIENT_CLIPPING = False
@@ -163,6 +166,15 @@ def parse_arguments():
     
     # Training Parameters
     train_group = parser.add_argument_group('Training Parameters')
+    
+    train_group.add_argument(
+        '--loss_type', 
+        type=str, 
+        default=DEFAULT_LOSS,
+        choices=['L2','L1'],
+        help='Choosing the specific loss'
+    )
+    
     train_group.add_argument(
         '--learning-rate', '--lr',
         type=float, 
@@ -353,6 +365,7 @@ MODEL_PATH = args.model_path
 EMBEDDER_PATH = args.embedder_path
 LOAD_MODEL = args.load_model
 ARCHITECTURE = args.architecture
+LOSS_TYPE = args.loss_type
 
 if(TAG_AS_EDGE):
     print('Since using edge that includes tag, switching the GNN architecture to Gatv2Conv')
@@ -360,19 +373,16 @@ if(TAG_AS_EDGE):
 
 
 current_params = {
-    # Architectural hyperparameters
     'HIDDEN_CHANNELS': HIDDEN_CHANNELS,
     'DROPOUT': DROPOUT,
     'AGGREGATION': AGGREGATION,
     'NUM_GNN_LAYERS': NUM_GNN_LAYERS,
     'NUM_MLP_LAYERS': NUM_MLP_LAYERS,
     'ARCHITECTURE': ARCHITECTURE,
-    # Training Parameters
     'LEARNING_RATE': LEARNING_RATE,
     'WEIGHT_DECAY': WEIGHT_DECAY,
     'NUM_EPOCHS': NUM_EPOCHS,
     'EARLY_STOPPING_PATIENCE': EARLY_STOPPING_PATIENCE,
-    # Data Loading
     'BATCH_SIZE': BATCH_SIZE,
     'NUM_NEIGHBORS': NUM_NEIGHBORS,
     'NEG_SAMPLING_RATIO': NEG_SAMPLING_RATIO,
@@ -382,21 +392,18 @@ current_params = {
     'USE_BN': USE_BN,
     'EMB_REG': EMB_REG,
     'JK_MODE': JK_MODE,
-    # Data Split
     'NUM_VAL': NUM_VAL,
     'NUM_TEST': NUM_TEST,
-    # Learning Rate Scheduler
     'USE_LR_SCHEDULER': USE_LR_SCHEDULER,
     'LR_SCHEDULER_FACTOR': LR_SCHEDULER_FACTOR,
     'LR_SCHEDULER_PATIENCE': LR_SCHEDULER_PATIENCE,
-    # Gradient Clipping
     'USE_GRADIENT_CLIPPING': USE_GRADIENT_CLIPPING,
     'GRAD_CLIP_VALUE': GRAD_CLIP_VALUE,
-    # Script Modality and Paths
     'MODALITY': MODALITY,
     'MODEL_PATH': MODEL_PATH,
     'EMBEDDER_PATH': EMBEDDER_PATH,
-    'LOAD_MODEL': LOAD_MODEL
+    'LOAD_MODEL': LOAD_MODEL,
+    'LOSS_TYPE' : LOSS_TYPE
 }
 
 
@@ -431,4 +438,5 @@ print(f"  Mode of use is :{MODALITY}")
 print(f"  Model path is :{MODEL_PATH}")
 print(f"  Model Loading is :{LOAD_MODEL}")
 print(f"  GNN architecture is :{ARCHITECTURE}")
+print(f"  Loss type is :{LOSS_TYPE}")
 
