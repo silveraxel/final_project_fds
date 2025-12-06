@@ -29,6 +29,7 @@ if TAG_AS_EDGE:
 
     
     try:
+        """""
         tag_edge_index, tag_edge_attr = load_edge_csv_tags(
             tags_path,
             src_index_col='userId',
@@ -38,7 +39,19 @@ if TAG_AS_EDGE:
             encoders={'tag': TagEncoder()},
             one_edge_per_row=True
         )
+        """
         
+# Load tag edges (user --[tags]--> movie)
+        tag_edge_index, tag_edge_attr = load_edge_csv_tags(
+            tags_path,
+            src_index_col='userId',
+            src_mapping=user_mapping,
+            dst_index_col='movieId',
+            dst_mapping=movie_mapping,
+            encoders={'tag': TagEncoder(hidden_channels=HIDDEN_CHANNELS)},
+            one_edge_per_row=True # Each row (tag) is a new edge
+        )
+
         print(f"Created {tag_edge_index.size(1)} tag edges")
         print(f"Tag edge features shape: {tag_edge_attr.shape}")
         
@@ -143,7 +156,8 @@ model = Model(
     use_bn=USE_BN,
     num_gnn_layers=NUM_GNN_LAYERS,
     num_mlp_layers=NUM_MLP_LAYERS,
-    jk_mode=JK_MODE
+    jk_mode=JK_MODE,
+    architecture=ARCHITECTURE
 ).to(device)
 
 
@@ -394,3 +408,42 @@ def evaluate_sample_predictions(movies_df, n_users=10, n_samples_per_user=5):
     plt.show()
     print(f"{'='*80}\n")
     return all_errors, all_actual, all_predicted
+
+
+def plot_metrics(metrics, filename='training_metrics.png'):
+    """Plots training loss and RMSE (Train vs. Val) collected per epoch."""
+    epochs = [m['epoch'] for m in metrics]
+    losses = [m['loss'] for m in metrics]
+    train_rmses = [m['train_rmse'] for m in metrics]
+    val_rmses = [m['val_rmse'] for m in metrics]
+    
+    # Create figure with two subplots
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # Subplot 1: Training Loss
+    axes[0].plot(epochs, losses, label='Train Loss (MSE)', color='blue')
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Loss (MSE)')
+    axes[0].set_title('Training Loss per Epoch')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # Subplot 2: RMSE (Train vs. Validation)
+    axes[1].plot(epochs, train_rmses, label='Train RMSE', color='orange')
+    axes[1].plot(epochs, val_rmses, label='Validation RMSE', color='red')
+    
+    # Find the best validation RMSE for annotation
+    if val_rmses:
+        best_val = min(val_rmses)
+        best_epoch = epochs[val_rmses.index(best_val)]
+        axes[1].axvline(x=best_epoch, color='gray', linestyle='--', label=f'Best Val Epoch ({best_epoch})')
+    
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('RMSE')
+    axes[1].set_title('RMSE per Epoch')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(filename)
+    print(f"\n✓ Metrics plot saved as: {filename}")

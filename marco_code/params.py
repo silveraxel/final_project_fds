@@ -4,20 +4,21 @@ import argparse
 # Architectural hyperparameters
 
 DEFAULT_HIDDEN_CHANNELS = 128        
-DEFAULT_DROPOUT = 0.3               
+DEFAULT_DROPOUT = 0.4               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
 DEFAULT_NUM_GNN_LAYERS = 3           
-DEFAULT_NUM_MLP_LAYERS = 2
+DEFAULT_NUM_MLP_LAYERS = 3
+DEFAULT_ARCHITECTURE='SageConv' #Options: 'SageConv', 'Gatv2Conv'
 
 # Training Parameters
-DEFAULT_LEARNING_RATE = 0.001        
+DEFAULT_LEARNING_RATE = 0.003        
 DEFAULT_WEIGHT_DECAY = 5e-4          
 DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 50 
+DEFAULT_EARLY_STOPPING_PATIENCE = 100 
 
 # Data Loading 
-DEFAULT_BATCH_SIZE = 128          
-DEFAULT_NUM_NEIGHBORS = [30, 10, 5] 
+DEFAULT_BATCH_SIZE = 512          
+DEFAULT_NUM_NEIGHBORS = [30, 10, 50] 
 DEFAULT_NEG_SAMPLING_RATIO = 3.0
 DEFAULT_NEG_SAMPLING = 'triplet' #Options: 'uniform', 'triplet'
 
@@ -100,6 +101,13 @@ def parse_arguments():
         default=DEFAULT_HIDDEN_CHANNELS,
         help='Number of hidden channels in the GNN layers'
     )
+    script_group.add_argument(
+        '--architecture', 
+        type=str, 
+        default=DEFAULT_ARCHITECTURE,
+        help='GNN architecture to be used'
+    )
+
     model_group.add_argument(
         '--dropout', 
         type=float, 
@@ -343,6 +351,11 @@ MODALITY = args.modality
 MODEL_PATH = args.model_path
 EMBEDDER_PATH = args.embedder_path
 LOAD_MODEL = args.load_model
+ARCHITECTURE = args.architecture
+
+if(TAG_AS_EDGE):
+    print('Since using edge that includes tag, switching the GNN architecture to Gatv2Conv')
+    ARCHITECTURE = 'Gatv2Conv'
 
 # Print all parameters
 print("Configuration:")
@@ -374,4 +387,5 @@ print(f"  Tag as Edge: {TAG_AS_EDGE}")
 print(f"  Mode of use is :{MODALITY}")
 print(f"  Model path is :{MODEL_PATH}")
 print(f"  Model Loading is :{LOAD_MODEL}")
+print(f"  GNN architecture is :{ARCHITECTURE}")
 

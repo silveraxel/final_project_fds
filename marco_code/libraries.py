@@ -164,7 +164,6 @@ class AggregatedTagEncoder:
             self.model = SentenceTransformer(model_name, device=device)
             self.model.save(local_path+model_name) 
             print(f"Model '{model_name}' saved locally to '{local_path}'")
-        #self.model = SentenceTransformer(model_name, device=device)
         self.tags_path = tags_path
         self.movie_mapping = movie_mapping
     
@@ -217,11 +216,27 @@ class AggregatedTagEncoder:
 
 
 class TagEncoder:
-    """Encode individual tags as embeddings (no aggregation)"""
-    def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
+    """Encode individual tags as embeddings (no aggregation), with optional projection."""
+    def __init__(self, model_name='all-MiniLM-L6-v2', device=None, hidden_channels=384):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
-        self.model = SentenceTransformer(model_name, device=device)
+        self.hidden_channels = hidden_channels
+        
+        try:
+            # Attempt to load locally first
+            self.model = SentenceTransformer(DEFAULT_EMBEDDER_PATH + model_name)
+        except:
+            # Download if not found locally
+            self.model = SentenceTransformer(model_name, device=device)
+
+        input_dim = self.model.get_sentence_embedding_dimension()
+        
+        if input_dim != self.hidden_channels:
+            print(f"Warning: Tag embedding dim ({input_dim}) != GNN hidden_channels ({self.hidden_channels}). Adding linear projection.")
+            self.projection = torch.nn.Linear(input_dim, self.hidden_channels)
+            torch.nn.init.xavier_uniform_(self.projection.weight)
+        else:
+            self.projection = None
 
     @torch.no_grad()
     def __call__(self, df):
@@ -229,30 +244,92 @@ class TagEncoder:
         # Encode each unique tag
         unique_tags = df['tag'].unique()
         print(f"Encoding {len(unique_tags)} unique tags...")
-        
+
         tag_embeddings = self.model.encode(
             unique_tags,
             show_progress_bar=True,
             convert_to_tensor=True,
             device=self.device
         ).cpu()
-        
-        # Create mapping
+
+        # Apply projection if necessary (MODIFICATION 3)
+        if self.projection is not None:
+             # Move projection layer to CPU for consistent tensor operations
+            tag_embeddings = self.projection.cpu()(tag_embeddings)
+
+
+        # Create mapping: tag string -> embedding tensor
         tag_to_embedding = {tag: tag_embeddings[i] for i, tag in enumerate(unique_tags)}
-        
-        # Return embeddings for each row
+
+        # Return embeddings for each row in the original tags DataFrame
         embeddings = []
         for _, row in df.iterrows():
             embeddings.append(tag_to_embedding[row['tag']])
-        
+
         embeddings = torch.stack(embeddings)
-        
-        # Return (embeddings, df) tuple for compatibility
+
+        # Return (embeddings, df) tuple for compatibility with load_edge_csv_tags
         return embeddings, df
 
 
+class GNN_GATv2Conv(torch.nn.Module):
+    #GNN Gatv2Conv with Jumping Knowledge connections and batch normalization
+    def __init__(self, hidden_channels, dropout=0.0, use_bn=False, num_layers=3, jk_mode='cat'):
+        super().__init__()
+        self.num_layers = num_layers
+        self.jk_mode = jk_mode
 
-class GNN(torch.nn.Module):
+        # Convolutional layers
+        self.convs = torch.nn.ModuleList([
+            GATv2Conv((-1, -1), hidden_channels, heads=1, concat=False, edge_dim=hidden_channels,add_self_loops=False)
+            for _ in range(num_layers)
+        ])
+
+        self.dropout = torch.nn.Dropout(dropout)
+
+        # Batch normalization
+        self.use_bn = use_bn
+        if use_bn:
+            self.bns = torch.nn.ModuleList([
+                torch.nn.BatchNorm1d(hidden_channels) for _ in range(num_layers)
+            ])
+
+        # Jumping Knowledge connection
+        self.jk = JumpingKnowledge(mode=jk_mode, channels=hidden_channels, num_layers=num_layers)
+
+        # Output projection (only needed for 'cat' mode)
+        if jk_mode == 'cat':
+            self.output_proj = torch.nn.Linear(hidden_channels * num_layers, hidden_channels)
+
+    def forward(self, x, edge_index, edge_attr=None):
+        # Store outputs from each layer
+        layer_outputs = []
+
+        # Apply all convolutional layers
+        for i in range(self.num_layers):
+            
+            x = self.convs[i](x, edge_index, edge_attr=edge_attr)
+
+            if self.use_bn:
+                x = self.bns[i](x)
+
+            x = x.relu()
+            x = self.dropout(x)
+
+            # Store this layer's output for JK
+            layer_outputs.append(x)
+
+        # Apply Jumping Knowledge to combine all layer outputs
+        x = self.jk(layer_outputs)
+
+        # Project back to hidden_channels if using concatenation
+        if self.jk_mode == 'cat':
+            x = self.output_proj(x)
+
+        return x
+
+
+class GNN_SageConv(torch.nn.Module):
     #GNN with Jumping Knowledge connections and batch normalization
     def __init__(self, hidden_channels, dropout=0.0, use_bn=False, num_layers=3, jk_mode='cat'):
         super().__init__()
@@ -309,6 +386,7 @@ class GNN(torch.nn.Module):
         return x
 
 
+
 class Classifier(torch.nn.Module):
     def __init__(self, hidden_channels, dropout=DEFAULT_DROPOUT, num_layers=DEFAULT_NUM_MLP_LAYERS):
         """
@@ -358,21 +436,34 @@ class Classifier(torch.nn.Module):
 
 class Model(torch.nn.Module):
     def __init__(self, hidden_channels, num_users, metadata,
-                 dropout=0.0, use_bn=DEFAULT_USE_BN, num_gnn_layers=DEFAULT_NUM_GNN_LAYERS, num_mlp_layers=DEFAULT_NUM_MLP_LAYERS, jk_mode=DEFAULT_JK_MODE):
+                 dropout=0.0, use_bn=DEFAULT_USE_BN, num_gnn_layers=DEFAULT_NUM_GNN_LAYERS, num_mlp_layers=DEFAULT_NUM_MLP_LAYERS, jk_mode=DEFAULT_JK_MODE, architecture=DEFAULT_ARCHITECTURE):
 
         super().__init__()
         
         self.user_emb = torch.nn.Embedding(num_users, hidden_channels)
         torch.nn.init.xavier_uniform_(self.user_emb.weight)
         
-        # GNN with Jumping Knowledge
-        self.gnn = GNN(
+        if architecture == 'SageConv':
+        #According to the use of tag as edge or not different kind of GNN
+            self.gnn = GNN_SageConv(
+                hidden_channels, 
+                dropout=dropout, 
+                use_bn=use_bn, 
+                num_layers=num_gnn_layers,
+                jk_mode=jk_mode)
+            
+        elif architecture == 'Gatv2Conv':
+            self.gnn = GNN_GATv2Conv(
             hidden_channels, 
             dropout=dropout, 
             use_bn=use_bn, 
             num_layers=num_gnn_layers,
-            jk_mode=jk_mode
-        )
+            jk_mode=jk_mode)
+        
+        else:
+            print('Not specified GNN architecture, exiting the initialization')
+            exit(1)
+
         self.gnn = to_hetero(self.gnn, metadata, aggr=AGGREGATION)
         
         self.classifier = Classifier(
