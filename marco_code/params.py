@@ -1,24 +1,25 @@
 import argparse
-
+from datetime import datetime
+import json
 
 # Architectural hyperparameters
 
 DEFAULT_HIDDEN_CHANNELS = 128        
-DEFAULT_DROPOUT = 0.4               
+DEFAULT_DROPOUT = 0.5               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
 DEFAULT_NUM_GNN_LAYERS = 3           
 DEFAULT_NUM_MLP_LAYERS = 3
 DEFAULT_ARCHITECTURE='SageConv' #Options: 'SageConv', 'Gatv2Conv'
 
-# Training Parameters
-DEFAULT_LEARNING_RATE = 0.003        
+# Training Parameters     
+DEFAULT_LEARNING_RATE = 0.001        
 DEFAULT_WEIGHT_DECAY = 5e-4          
 DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 100 
+DEFAULT_EARLY_STOPPING_PATIENCE = 50 
 
 # Data Loading 
 DEFAULT_BATCH_SIZE = 512          
-DEFAULT_NUM_NEIGHBORS = [30, 10, 50] 
+DEFAULT_NUM_NEIGHBORS = [30, 10, 5] 
 DEFAULT_NEG_SAMPLING_RATIO = 3.0
 DEFAULT_NEG_SAMPLING = 'triplet' #Options: 'uniform', 'triplet'
 
@@ -356,6 +357,48 @@ ARCHITECTURE = args.architecture
 if(TAG_AS_EDGE):
     print('Since using edge that includes tag, switching the GNN architecture to Gatv2Conv')
     ARCHITECTURE = 'Gatv2Conv'
+
+
+current_params = {
+    # Architectural hyperparameters
+    'HIDDEN_CHANNELS': HIDDEN_CHANNELS,
+    'DROPOUT': DROPOUT,
+    'AGGREGATION': AGGREGATION,
+    'NUM_GNN_LAYERS': NUM_GNN_LAYERS,
+    'NUM_MLP_LAYERS': NUM_MLP_LAYERS,
+    'ARCHITECTURE': ARCHITECTURE,
+    # Training Parameters
+    'LEARNING_RATE': LEARNING_RATE,
+    'WEIGHT_DECAY': WEIGHT_DECAY,
+    'NUM_EPOCHS': NUM_EPOCHS,
+    'EARLY_STOPPING_PATIENCE': EARLY_STOPPING_PATIENCE,
+    # Data Loading
+    'BATCH_SIZE': BATCH_SIZE,
+    'NUM_NEIGHBORS': NUM_NEIGHBORS,
+    'NEG_SAMPLING_RATIO': NEG_SAMPLING_RATIO,
+    'NEG_SAMPLING': NEG_SAMPLING,
+    'DIRNAME_MOVIELENS': DIRNAME_MOVIELENS,
+    'TAG_AS_EDGE': TAG_AS_EDGE,
+    'USE_BN': USE_BN,
+    'EMB_REG': EMB_REG,
+    'JK_MODE': JK_MODE,
+    # Data Split
+    'NUM_VAL': NUM_VAL,
+    'NUM_TEST': NUM_TEST,
+    # Learning Rate Scheduler
+    'USE_LR_SCHEDULER': USE_LR_SCHEDULER,
+    'LR_SCHEDULER_FACTOR': LR_SCHEDULER_FACTOR,
+    'LR_SCHEDULER_PATIENCE': LR_SCHEDULER_PATIENCE,
+    # Gradient Clipping
+    'USE_GRADIENT_CLIPPING': USE_GRADIENT_CLIPPING,
+    'GRAD_CLIP_VALUE': GRAD_CLIP_VALUE,
+    # Script Modality and Paths
+    'MODALITY': MODALITY,
+    'MODEL_PATH': MODEL_PATH,
+    'EMBEDDER_PATH': EMBEDDER_PATH,
+    'LOAD_MODEL': LOAD_MODEL
+}
+
 
 # Print all parameters
 print("Configuration:")

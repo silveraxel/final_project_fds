@@ -29,17 +29,6 @@ if TAG_AS_EDGE:
 
     
     try:
-        """""
-        tag_edge_index, tag_edge_attr = load_edge_csv_tags(
-            tags_path,
-            src_index_col='userId',
-            src_mapping=user_mapping,
-            dst_index_col='movieId',
-            dst_mapping=movie_mapping,
-            encoders={'tag': TagEncoder()},
-            one_edge_per_row=True
-        )
-        """
         
 # Load tag edges (user --[tags]--> movie)
         tag_edge_index, tag_edge_attr = load_edge_csv_tags(
@@ -410,8 +399,32 @@ def evaluate_sample_predictions(movies_df, n_users=10, n_samples_per_user=5):
     return all_errors, all_actual, all_predicted
 
 
-def plot_metrics(metrics, filename='training_metrics.png'):
-    """Plots training loss and RMSE (Train vs. Val) collected per epoch."""
+import os
+from datetime import datetime # Ensure this is imported in libraries.py
+import matplotlib.pyplot as plt
+# ... other code ...
+
+def plot_metrics(metrics, model_path):
+    """
+    Plots training loss and RMSE (Train vs. Val) collected per epoch, 
+    generating a unique filename using the model path and a newly generated timestamp.
+
+    Args:
+        metrics (list): List of dictionaries containing training metrics.
+        model_path (str): The full path to the model file (e.g., './best_model.pt').
+    """
+    
+    # 1. Generate unique timestamp
+    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # 2. Extract model name from MODEL_PATH
+    model_filename = os.path.basename(model_path)
+    # Get filename without extension (e.g., 'best_model')
+    model_name_base = os.path.splitext(model_filename)[0]
+    
+    # 3. Construct the final plot filename (e.g., 'best_model_20251207_030500.png')
+    plot_filename = f"{model_name_base}_{timestamp_str}.png" 
+    
     epochs = [m['epoch'] for m in metrics]
     losses = [m['loss'] for m in metrics]
     train_rmses = [m['train_rmse'] for m in metrics]
@@ -445,5 +458,42 @@ def plot_metrics(metrics, filename='training_metrics.png'):
     axes[1].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(filename)
-    print(f"\n✓ Metrics plot saved as: {filename}")
+    plt.savefig(plot_filename)
+    print(f"\n✓ Metrics plot saved as: {plot_filename}")
+
+
+
+def log_parameters(params: dict):
+
+    # 1. Get current timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # 2. Extract model name from MODEL_PATH
+    model_path = params.get('MODEL_PATH', './default_model.pt')
+    
+    # Get the filename (e.g., 'best_model.pt')
+    model_filename = os.path.basename(model_path)
+    
+    # Remove the extension (e.g., 'best_model')
+    model_name_base = os.path.splitext(model_filename)[0]
+    
+    # 3. Construct the log file name
+    log_filename = f"{model_name_base}_{timestamp}.txt"
+    
+    # 4. Write parameters to the log file
+    try:
+        with open(log_filename, 'w') as f:
+            f.write(f"--- Training Configuration Log ---\n")
+            f.write(f"Timestamp: {timestamp}\n")
+            f.write(f"Model Path: {model_path}\n")
+            f.write("-" * 40 + "\n")
+            
+            # Sort parameters alphabetically for a consistent log format
+            for key in sorted(params.keys()):
+                value = params[key]
+                # Use json.dumps for clean printing of lists/dicts (like NUM_NEIGHBORS)
+                f.write(f"{key:<30}: {json.dumps(value)}\n") 
+        
+        print(f"\n✓ Configuration saved to log file: {log_filename}")
+    except IOError as e:
+        print(f"Error saving log file {log_filename}: {e}")

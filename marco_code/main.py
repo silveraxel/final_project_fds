@@ -20,7 +20,13 @@ if MODALITY == 'training':
         val_rmse = test(val_loader)
         
         train_val_gap = val_rmse - train_rmse
-        
+        metrics.append({
+            'epoch': epoch,
+            'loss': loss,
+            'train_rmse': train_rmse,
+            'val_rmse': val_rmse
+        })
+
         if USE_LR_SCHEDULER:
             scheduler.step(val_rmse)
         
@@ -42,7 +48,8 @@ if MODALITY == 'training':
         if patience_counter >= EARLY_STOPPING_PATIENCE:
             print(f'\n✓ Early stopping at epoch {epoch}')
             break
-    plot_metrics(metrics)
+    plot_metrics(metrics, model_path=MODEL_PATH)
+    log_parameters(current_params)
     
 elif MODALITY == 'inference':
 # Load best model
@@ -54,7 +61,7 @@ elif MODALITY == 'inference':
 
 
     # Run sample predictions with visualization
-    errors, actual, predicted = evaluate_sample_predictions(movies_df, n_users=100, n_samples_per_user=10)
+    errors, actual, predicted = evaluate_sample_predictions(movies_df, n_users=100, n_samples_per_user=50)
 
 else:
     print('Internal error no valid modality has been defined. Exiting the script')
