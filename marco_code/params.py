@@ -3,19 +3,18 @@ from datetime import datetime
 import json
 
 # Architectural hyperparameters
-
 DEFAULT_HIDDEN_CHANNELS = 256        
-DEFAULT_DROPOUT = 0.5               
+DEFAULT_DROPOUT = 0.3               
 DEFAULT_AGGREGATION = 'mean'	# Options: 'mean', 'sum'	
 DEFAULT_NUM_GNN_LAYERS = 3           
 DEFAULT_NUM_MLP_LAYERS = 3
 DEFAULT_ARCHITECTURE='SageConv' #Options: 'SageConv', 'Gatv2Conv'
 
 # Training Parameters     
-DEFAULT_LEARNING_RATE = 0.003        
+DEFAULT_LEARNING_RATE = 0.001        
 DEFAULT_WEIGHT_DECAY = 5e-4          
 DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 100 
+DEFAULT_EARLY_STOPPING_PATIENCE = 30 
 
 # Data Loading 
 DEFAULT_BATCH_SIZE = 512          

@@ -6,6 +6,7 @@ if MODALITY == 'training':
     best_train_rmse = float('inf')
     patience_counter = 0
     metrics = []
+    log_parameters(current_params)
 
     if LOAD_MODEL:
         model_weights = torch.load(MODEL_PATH)
@@ -39,7 +40,7 @@ if MODALITY == 'training':
         else:
             patience_counter += 1
             improvement_marker = ""
-        
+        print(f'Patience Counter: {patience_counter:03d} \n')
         
         print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, '
             f'Train: {train_rmse:.4f}, Val: {val_rmse:.4f}, '
@@ -49,7 +50,6 @@ if MODALITY == 'training':
             print(f'\n✓ Early stopping at epoch {epoch}')
             break
     plot_metrics(metrics, model_path=MODEL_PATH)
-    log_parameters(current_params)
     
 elif MODALITY == 'inference':
 # Load best model
