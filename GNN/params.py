@@ -36,7 +36,7 @@ DEFAULT_LR_SCHEDULER_PATIENCE = 10
 DEFAULT_LOSS = 'L2' # Options: 'L2', 'L1', 'L2_weighted', 'L2_focal'
 DEFAULT_LOSS_WEIGHT_TYPE = 'quadratic'  # Options: 'linear', 'quadratic', 'cubic', 'exponential'
 DEFAULT_LOSS_MIN_WEIGHT = 1.0           # Minimum weight for low ratings
-DEFAULT_LOSS_GAMMA = 2.0                # Focal loss gamma parameter (for focal_mse)
+DEFAULT_LOSS_GAMMA = 1.0                # Focal loss gamma parameter (for focal_mse)
 
 
 
