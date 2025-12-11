@@ -33,7 +33,12 @@ DEFAULT_LR_SCHEDULER_FACTOR = 0.5
 DEFAULT_LR_SCHEDULER_PATIENCE = 10
 
 #Type of Loss function
-DEFAULT_LOSS = 'L2' # Options: 'L2', 'L1'
+DEFAULT_LOSS = 'L2' # Options: 'L2', 'L1', 'L2_weighted', 'L2_focal'
+DEFAULT_LOSS_WEIGHT_TYPE = 'quadratic'  # Options: 'linear', 'quadratic', 'cubic', 'exponential'
+DEFAULT_LOSS_MIN_WEIGHT = 1.0           # Minimum weight for low ratings
+DEFAULT_LOSS_GAMMA = 2.0                # Focal loss gamma parameter (for focal_mse)
+
+
 
 # Gradient Clipping
 DEFAULT_USE_GRADIENT_CLIPPING = True
@@ -171,15 +176,35 @@ def parse_arguments():
         '--loss_type', 
         type=str, 
         default=DEFAULT_LOSS,
-        choices=['L2','L1'],
+        choices=['L2','L1', 'L2_weighted', 'L2_focal'],
         help='Choosing the specific loss'
     )
-    
     train_group.add_argument(
         '--learning-rate', '--lr',
         type=float, 
         default=DEFAULT_LEARNING_RATE,
         help='Learning rate for optimizer'
+    )
+
+    train_group.add_argument(
+        '--loss-weight-type',
+        type=str, 
+        default=DEFAULT_LOSS_WEIGHT_TYPE,
+        help='In case of L2 weighted loss, specifies how to weight'
+    )
+
+    train_group.add_argument(
+        '--loss-minimum-weight',
+        type=float, 
+        default=DEFAULT_LOSS_MIN_WEIGHT,
+        help='In case of L2 weighted loss, specifies the minimum loss weight'
+    )
+
+    train_group.add_argument(
+        '--loss-gamma-param',
+        type=float, 
+        default=DEFAULT_LOSS_GAMMA,
+        help='In case of L2 focal loss, specifies gamma parameter'
     )
     train_group.add_argument(
         '--weight-decay', '--wd',
@@ -366,7 +391,9 @@ EMBEDDER_PATH = args.embedder_path
 LOAD_MODEL = args.load_model
 ARCHITECTURE = args.architecture
 LOSS_TYPE = args.loss_type
-
+LOSS_WEIGHT_TYPE = args.loss_weight_type
+LOSS_MIN_WEIGHT = args.loss_minimum_weight
+LOSS_GAMMA = args.loss_gamma_param
 
 current_params = {
     'HIDDEN_CHANNELS': args.hidden_channels,
@@ -399,7 +426,10 @@ current_params = {
     'MODEL_PATH': args.model_path,
     'EMBEDDER_PATH': args.embedder_path,
     'LOAD_MODEL': args.load_model,
-    'LOSS_TYPE' : args.loss_type
+    'LOSS_TYPE' : args.loss_type,
+    'LOSS_WEIGHT_TYPE' :args.loss_weight_type,
+    'LOSS_MIN_WEIGHT' : args.loss_minimum_weight,
+    'LOSS_GAMMA' : args.loss_gamma_param
 }
 
 if(TAG_AS_EDGE):

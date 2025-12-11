@@ -13,6 +13,7 @@ from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.nn import JumpingKnowledge
 from torch_geometric.nn import GATv2Conv
 from params import *
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 
 
@@ -490,7 +491,88 @@ class Model(torch.nn.Module):
         return pred
 
 
+class WeightedMSELoss(torch.nn.Module):
+    """
+    Weighted MSE Loss that penalizes errors on higher ratings more heavily.
+    This encourages the model to predict high ratings when appropriate.
+    """
+    def __init__(self, weight_type='quadratic', min_weight=1.0, rating_scale=5.0):
+        super().__init__()
+        self.weight_type = weight_type
+        self.min_weight = min_weight
+        self.rating_scale = rating_scale
+        
+    def compute_weights(self, target):
+        """Compute sample weights based on target ratings"""
+        normalized_target = target / self.rating_scale
+        
+        if self.weight_type == 'linear':
+            weights = normalized_target
+        elif self.weight_type == 'quadratic':
+            weights = normalized_target ** 2
+        elif self.weight_type == 'cubic':
+            weights = normalized_target ** 3
+        elif self.weight_type == 'exponential':
+            weights = torch.exp(normalized_target) - 1
+        else:
+            raise ValueError(f"Unknown weight_type: {self.weight_type}")
+        
+        # Apply minimum weight and rescale
+        weights = torch.clamp(weights, min=self.min_weight)
+        
+        return weights
+    
+    def forward(self, pred, target):
+        weights = self.compute_weights(target)
+        squared_errors = (pred - target) ** 2
+        weighted_errors = weights * squared_errors
+        
+        return weighted_errors.mean()
+    
 
 
-
+class FocalMSELoss(torch.nn.Module):
+    """
+    Focal MSE Loss - focuses on hard examples (large errors).
+    Combines weighting by rating value AND by error magnitude.
+    """
+    def __init__(self, rating_weight='quadratic', gamma=2.0, rating_scale=5.0):
+        """
+        Args:
+            rating_weight: How to weight by rating value ('linear', 'quadratic', 'cubic')
+            gamma: Focusing parameter (higher = more focus on hard examples)
+            rating_scale: Maximum rating value
+        """
+        super().__init__()
+        self.rating_weight = rating_weight
+        self.gamma = gamma
+        self.rating_scale = rating_scale
+        
+    def forward(self, pred, target):
+        # Weight by rating value
+        normalized_target = target / self.rating_scale
+        if self.rating_weight == 'linear':
+            rating_weights = normalized_target
+        elif self.rating_weight == 'quadratic':
+            rating_weights = normalized_target ** 2
+        elif self.rating_weight == 'cubic':
+            rating_weights = normalized_target ** 3
+        else:
+            rating_weights = torch.ones_like(target)
+        
+        # Compute errors
+        errors = torch.abs(pred - target)
+        squared_errors = errors ** 2
+        
+        # Focal weight: focus more on larger errors
+        # Normalize errors to [0, 1] range for stability
+        max_error = self.rating_scale
+        normalized_errors = errors / max_error
+        focal_weights = normalized_errors ** self.gamma
+        
+        # Combine both weights
+        total_weights = rating_weights * (1.0 + focal_weights)
+        weighted_errors = total_weights * squared_errors
+        
+        return weighted_errors.mean()
 

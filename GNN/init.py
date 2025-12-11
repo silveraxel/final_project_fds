@@ -214,7 +214,14 @@ def train():
     if LOSS_TYPE == 'L2':
         criterion = torch.nn.MSELoss()
     elif LOSS_TYPE == 'L1':
-        criterion =torch.nn.L1Loss()
+        criterion = torch.nn.L1Loss()
+    elif LOSS_TYPE == 'L2_weighted':
+        criterion = WeightedMSELoss(weight_type=LOSS_WEIGHT_TYPE,min_weight=LOSS_MIN_WEIGHT,rating_scale=5.0)
+    elif LOSS_TYPE == 'L2_focal':
+        criterion = FocalMSELoss(
+        rating_weight=LOSS_WEIGHT_TYPE,
+        gamma=LOSS_GAMMA,
+        rating_scale=5.0)
     else:
         print('Not defined a loss function. Exiting the script')
         exit(1)
@@ -293,9 +300,8 @@ def predict_rating(user_id, movie_id):
         return pred.item()
     
 
-@torch.no_grad()
-def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_per_user=5):
-
+def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_per_user=5, rating_threshold=3.5):
+    
     model_path = params.get('MODEL_PATH', './default_model.pt')
     model_filename = os.path.basename(model_path)
     model_name_base = os.path.splitext(model_filename)[0]
@@ -304,13 +310,15 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
     reverse_user_mapping = {v: k for k, v in user_mapping.items()}
     reverse_movie_mapping = {v: k for k, v in movie_mapping.items()}
     
-    """Sample n_users, predict n_samples per user, and plot prediction errors"""
     model.eval()
     print(f"\n{'='*80}")
     print(f"SAMPLE PREDICTIONS - {n_users} Users x {n_samples_per_user} Movies Each")
+    print(f"Rating threshold for binary classification: {rating_threshold}")
     print(f"{'='*80}\n")
+    
     test_edges = test_data['user', 'rates', 'movie'].edge_label_index
     test_labels = test_data['user', 'rates', 'movie'].edge_label
+    
     # Group test edges by user
     user_edges = {}
     for i in range(test_edges.size(1)):
@@ -318,39 +326,68 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
         if user_idx not in user_edges:
             user_edges[user_idx] = []
         user_edges[user_idx].append(i)
+    
     eligible_users = [u for u, edges in user_edges.items() if len(edges) >= n_samples_per_user]
     if len(eligible_users) < n_users:
         print(f"Warning: Only {len(eligible_users)} users have {n_samples_per_user}+ ratings")
         n_users = len(eligible_users)
+    
     sampled_users = np.random.choice(eligible_users, size=n_users, replace=False)
+    
     all_errors = []
     all_actual = []
     all_predicted = []
+    all_actual_binary = [] 
+    all_predicted_binary = []  
     user_labels = []
+    
     for user_idx in sampled_users:
         user_id = reverse_user_mapping[user_idx]
         available_edges = user_edges[user_idx]
         sampled_edge_indices = np.random.choice(available_edges, size=n_samples_per_user, replace=False)
+        
         print(f"\nUser {user_id}:")
         user_errors = []
+        
         for edge_idx in sampled_edge_indices:
             movie_idx = test_edges[1, edge_idx].item()
             actual_rating = test_labels[edge_idx].item()
             movie_id = reverse_movie_mapping[movie_idx]
             movie_title = movies_df[movies_df['movieId'] == movie_id]['title'].values[0]
+            
             predicted_rating = predict_rating(user_id, movie_id)
+            
             error = abs(predicted_rating - actual_rating)
             user_errors.append(error)
             all_errors.append(error)
             all_actual.append(actual_rating)
             all_predicted.append(predicted_rating)
+            
+            # NEW: Binary classification
+            actual_binary = 1 if actual_rating > rating_threshold else 0
+            predicted_binary = 1 if predicted_rating > rating_threshold else 0
+            all_actual_binary.append(actual_binary)
+            all_predicted_binary.append(predicted_binary)
+            
             print(f"  {movie_title[:50]:50s} | Actual: {actual_rating:.1f} | Pred: {predicted_rating:.2f} | Error: {error:.2f}")
+        
         avg_user_error = np.mean(user_errors)
         print(f"  → Average Error for User {user_id}: {avg_user_error:.3f}")
         user_labels.extend([f"User {user_id}"] * n_samples_per_user)
+    
     all_errors = np.array(all_errors)
     all_actual = np.array(all_actual)
     all_predicted = np.array(all_predicted)
+    all_actual_binary = np.array(all_actual_binary)
+    all_predicted_binary = np.array(all_predicted_binary)
+
+        
+    accuracy = accuracy_score(all_actual_binary, all_predicted_binary)
+    precision = precision_score(all_actual_binary, all_predicted_binary, zero_division=0)
+    recall = recall_score(all_actual_binary, all_predicted_binary, zero_division=0)
+    f1 = f1_score(all_actual_binary, all_predicted_binary, zero_division=0)
+    conf_matrix = confusion_matrix(all_actual_binary, all_predicted_binary)
+    
     print(f"\n{'='*80}")
     print("OVERALL STATISTICS")
     print(f"{'='*80}")
@@ -360,10 +397,23 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
     print(f"Min Error: {np.min(all_errors):.3f}")
     print(f"Max Error: {np.max(all_errors):.3f}")
     print(f"RMSE: {np.sqrt(np.mean(all_errors**2)):.3f}")
-    # Create visualization
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+    print(f"\n{'='*80}")
+    print(f"BINARY CLASSIFICATION (Threshold: {rating_threshold})")
+    print(f"{'='*80}")
+    print(f"Accuracy: {accuracy:.3f}")
+    print(f"Precision: {precision:.3f}")
+    print(f"Recall: {recall:.3f}")
+    print(f"F1 Score: {f1:.3f}")
+    print(f"\nConfusion Matrix:")
+    print(f"                  Predicted Not Advised  Predicted Advised")
+    print(f"Actual Not Advised        {conf_matrix[0,0]:5d}                {conf_matrix[0,1]:5d}")
+    print(f"Actual Advised            {conf_matrix[1,0]:5d}                {conf_matrix[1,1]:5d}")
+    
+    fig, axes = plt.subplots(3, 2, figsize=(14, 15))
     fig.suptitle(f'Prediction Error Analysis ({n_users} Users × {n_samples_per_user} Predictions)', 
                 fontsize=14, fontweight='bold')
+    
     axes[0, 0].hist(all_errors, bins=30, edgecolor='black', alpha=0.7, color='skyblue')
     axes[0, 0].axvline(np.mean(all_errors), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(all_errors):.3f}')
     axes[0, 0].set_xlabel('Absolute Error', fontsize=11)
@@ -371,6 +421,7 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
     axes[0, 0].set_title('Distribution of Prediction Errors', fontsize=12, fontweight='bold')
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
+    
     axes[0, 1].scatter(all_actual, all_predicted, alpha=0.6, s=50, color='coral')
     axes[0, 1].plot([0, 5], [0, 5], 'k--', linewidth=2, label='Perfect Prediction')
     axes[0, 1].set_xlabel('Actual Rating', fontsize=11)
@@ -380,6 +431,7 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
     axes[0, 1].grid(True, alpha=0.3)
     axes[0, 1].set_xlim(0, 5.5)
     axes[0, 1].set_ylim(0, 5.5)
+    
     user_error_data = []
     user_names = []
     for user_idx in sampled_users:
@@ -387,6 +439,7 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
         user_mask = np.array([label == f"User {user_id}" for label in user_labels])
         user_error_data.append(all_errors[user_mask])
         user_names.append(f"U{user_id}")
+    
     bp = axes[1, 0].boxplot(user_error_data, labels=user_names, patch_artist=True)
     for patch in bp['boxes']:
         patch.set_facecolor('lightgreen')
@@ -395,6 +448,8 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
     axes[1, 0].set_title('Error Distribution per User', fontsize=12, fontweight='bold')
     axes[1, 0].grid(True, alpha=0.3, axis='y')
     axes[1, 0].tick_params(axis='x', rotation=45)
+    
+    # Plot 4: Error vs Actual Rating
     axes[1, 1].scatter(all_actual, all_errors, alpha=0.6, s=50, color='mediumpurple')
     axes[1, 1].axhline(np.mean(all_errors), color='red', linestyle='--', linewidth=2, label=f'Mean Error: {np.mean(all_errors):.3f}')
     axes[1, 1].set_xlabel('Actual Rating', fontsize=11)
@@ -403,14 +458,48 @@ def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_p
     axes[1, 1].legend()
     axes[1, 1].grid(True, alpha=0.3)
     axes[1, 1].set_xlim(0, 5.5)
+    
+    categories = ['True Not Advised\n(TN)', 'False Advised\n(FP)', 
+                  'False Not Advised\n(FN)', 'True Advised\n(TP)']
+    values = [conf_matrix[0, 0], conf_matrix[0, 1], conf_matrix[1, 0], conf_matrix[1, 1]]
+    colors = ['lightgreen', 'salmon', 'salmon', 'lightgreen']
+    
+    bars = axes[2, 0].bar(categories, values, color=colors, edgecolor='black', alpha=0.7)
+    axes[2, 0].set_ylabel('Count', fontsize=11)
+    axes[2, 0].set_title(f'Binary Classification Results (Threshold: {rating_threshold})', 
+                         fontsize=12, fontweight='bold')
+    axes[2, 0].grid(True, alpha=0.3, axis='y')
+    
+    for bar, value in zip(bars, values):
+        height = bar.get_height()
+        axes[2, 0].text(bar.get_x() + bar.get_width()/2., height,
+                       f'{int(value)}',
+                       ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # NEW: Plot 6: Binary Classification Metrics
+    metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+    metrics_values = [accuracy, precision, recall, f1]
+    
+    bars = axes[2, 1].barh(metrics_names, metrics_values, color='steelblue', edgecolor='black', alpha=0.7)
+    axes[2, 1].set_xlabel('Score', fontsize=11)
+    axes[2, 1].set_title('Binary Classification Metrics', fontsize=12, fontweight='bold')
+    axes[2, 1].set_xlim(0, 1)
+    axes[2, 1].grid(True, alpha=0.3, axis='x')
+    
+    # Add value labels on bars
+    for bar, value in zip(bars, metrics_values):
+        width = bar.get_width()
+        axes[2, 1].text(width, bar.get_y() + bar.get_height()/2.,
+                       f'{value:.3f}',
+                       ha='left', va='center', fontsize=10, fontweight='bold', 
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+    
     plt.tight_layout()
     plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
     print(f"\n✓ Plot saved as: {plot_filename}")
-    #plt.show()
     print(f"{'='*80}\n")
-    return all_errors, all_actual, all_predicted
-
-
+    
+    return all_errors, all_actual, all_predicted, all_actual_binary, all_predicted_binary
 
 def plot_metrics(metrics, params: dict):
 
