@@ -60,7 +60,7 @@ elif MODALITY == 'inference':
 
 
     # Run sample predictions with visualization
-    errors, actual, predicted = evaluate_sample_predictions(current_params, movies_df, n_users=10, n_samples_per_user=2)
+    errors, actual, predicted = evaluate_sample_predictions(current_params, movies_df, n_users=50, n_samples_per_user=100)
 
 else:
     print('Internal error no valid modality has been defined. Exiting the script')

@@ -36,7 +36,7 @@ DEFAULT_LR_SCHEDULER_PATIENCE = 10
 DEFAULT_LOSS = 'L2' # Options: 'L2', 'L1'
 
 # Gradient Clipping
-DEFAULT_USE_GRADIENT_CLIPPING = False
+DEFAULT_USE_GRADIENT_CLIPPING = True
 DEFAULT_GRAD_CLIP_VALUE = 1.0
 
 #Embedding Regularization
@@ -54,7 +54,7 @@ DEFAULT_USE_BN = True
 
 # Specify if using movielens TAGS as a feature of the movie or a new edge between user and movie
 
-DEFAULT_TAG_AS_EDGE = False
+DEFAULT_TAG_AS_EDGE = True
 
 #Specify modality of the software (Training or Inference)
 
@@ -399,8 +399,7 @@ current_params = {
     'MODEL_PATH': args.model_path,
     'EMBEDDER_PATH': args.embedder_path,
     'LOAD_MODEL': args.load_model,
-    'LOSS_TYPE' : args.loss_type,
-    'ARCHITECTURE' : args.architecture
+    'LOSS_TYPE' : args.loss_type
 }
 
 if(TAG_AS_EDGE):
@@ -427,7 +426,37 @@ if (MODALITY == 'inference'):
             print(f"Error in loading the config file {log_data}: {e}")
             print('Trying with input and default parameters')
 
+elif (MODALITY == 'training' and LOAD_MODEL):
+        
+        model_filename = os.path.basename(MODEL_PATH)
+        model_name_base = os.path.splitext(model_filename)[0]
+        log_data = f"{model_name_base}_params_data.json"
 
+        try:
+            with open(log_data, 'r') as f:
+                loaded_params = json.load(f)    
+                
+                current_params['NUM_MLP_LAYERS']  = loaded_params['NUM_MLP_LAYERS']
+                current_params['NUM_GNN_LAYERS']  = loaded_params['NUM_GNN_LAYERS']
+                current_params['ARCHITECTURE']    = loaded_params['ARCHITECTURE']
+                current_params['TAG_AS_EDGE']     = loaded_params['TAG_AS_EDGE']
+                current_params['EMBEDDER_PATH']   = loaded_params['EMBEDDER_PATH']
+                current_params['LOSS_TYPE']       = loaded_params['LOSS_TYPE']
+                current_params['HIDDEN_CHANNELS'] = loaded_params['HIDDEN_CHANNELS']
+                current_params['AGGREGATION']     = loaded_params['AGGREGATION']
+                
+                NUM_MLP_LAYERS  = current_params['NUM_MLP_LAYERS']
+                NUM_GGN_LAYERS  = current_params['NUM_GNN_LAYERS']
+                ARCHITECTURE    = current_params['ARCHITECTURE']
+                TAG_AS_EDGE     = current_params['TAG_AS_EDGE']
+                EMBEDDER_PATH   = current_params['EMBEDDER_PATH']
+                LOSS_TYPE       = current_params['LOSS_TYPE']
+                HIDDEN_CHANNELS = current_params['HIDDEN_CHANNELS']
+                AGGREGATION     = current_params['AGGREGATION']
+
+        except IOError as e:
+            print(f"Error in loading the config file {log_data}: {e}")
+            print('Trying with input and default parameters')
 
 # Print all parameters
 print("Configuration:")

@@ -19,7 +19,7 @@ LEARNING_RATES=(0.001 0.005 0.01)
 LOSS_TYPES=("L2")
 NUM_GNN_LAYERS=(3 4)
 NUM_MLP_LAYERS=(1 2 3)
-BATCH_SIZES=(128 256 512)
+BATCH_SIZES=(512 256)
 TAG_AS_EDGE_VALUES=(true)
 GRADIENT_CLIPPING_VALUES=(true)
 
@@ -96,7 +96,7 @@ for lr in "${LEARNING_RATES[@]}"; do
                                 echo "Using the following training params"
                                 echo "${TRAINING_PARAMS} ${COMMON_PARAMS}"
 
-                                python3 main.py ${TRAINING_PARAMS} ${COMMON_PARAMS} | tee "${TRAIN_LOG}"
+                                python3 main.py ${TRAINING_PARAMS} ${COMMON_PARAMS}
                                 
                                 if [ -f "${MODEL_NAME}_loss.png" ]; then
                                     mv "${MODEL_NAME}_loss.png" "${PLOT_DIR}/"
@@ -114,7 +114,7 @@ for lr in "${LEARNING_RATES[@]}"; do
 
                                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting inference..."
                                 
-                                python3 main.py  ${INFERENCE_PARAMS} | tee "${INFERENCE_LOG}" 
+                                python3 main.py  ${INFERENCE_PARAMS} 
     
                                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Inference completed successfully"
 
