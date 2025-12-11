@@ -1,4 +1,4 @@
-import os
+#import os
 import pandas as pd
 import torch
 import numpy as np
@@ -12,9 +12,7 @@ import torch.nn.functional as F
 from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.nn import JumpingKnowledge
 from torch_geometric.nn import GATv2Conv
-
 from params import *
-import json
 
 
 

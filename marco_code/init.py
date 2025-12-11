@@ -136,7 +136,6 @@ print(f"\nUsing device: {device}")
 
 num_users = len(user_mapping)
 
-
 model = Model(
     hidden_channels=HIDDEN_CHANNELS,
     num_users=num_users,
@@ -295,7 +294,12 @@ def predict_rating(user_id, movie_id):
     
 
 @torch.no_grad()
-def evaluate_sample_predictions(movies_df, n_users=10, n_samples_per_user=5):
+def evaluate_sample_predictions(params: dict, movies_df, n_users=10, n_samples_per_user=5):
+
+    model_path = params.get('MODEL_PATH', './default_model.pt')
+    model_filename = os.path.basename(model_path)
+    model_name_base = os.path.splitext(model_filename)[0]
+    plot_filename = f"{model_name_base}_analysis.png" 
 
     reverse_user_mapping = {v: k for k, v in user_mapping.items()}
     reverse_movie_mapping = {v: k for k, v in movie_mapping.items()}
@@ -400,39 +404,21 @@ def evaluate_sample_predictions(movies_df, n_users=10, n_samples_per_user=5):
     axes[1, 1].grid(True, alpha=0.3)
     axes[1, 1].set_xlim(0, 5.5)
     plt.tight_layout()
-    plot_filename = 'prediction_error_analysis.png'
     plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
     print(f"\n✓ Plot saved as: {plot_filename}")
-    plt.show()
+    #plt.show()
     print(f"{'='*80}\n")
     return all_errors, all_actual, all_predicted
 
 
-import os
-from datetime import datetime # Ensure this is imported in libraries.py
-import matplotlib.pyplot as plt
-# ... other code ...
 
-def plot_metrics(metrics, model_path):
-    """
-    Plots training loss and RMSE (Train vs. Val) collected per epoch, 
-    generating a unique filename using the model path and a newly generated timestamp.
+def plot_metrics(metrics, params: dict):
 
-    Args:
-        metrics (list): List of dictionaries containing training metrics.
-        model_path (str): The full path to the model file (e.g., './best_model.pt').
-    """
-    
-    # 1. Generate unique timestamp
-    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    # 2. Extract model name from MODEL_PATH
+
+    model_path = params.get('MODEL_PATH', './default_model.pt')
     model_filename = os.path.basename(model_path)
-    # Get filename without extension (e.g., 'best_model')
     model_name_base = os.path.splitext(model_filename)[0]
-    
-    # 3. Construct the final plot filename (e.g., 'best_model_20251207_030500.png')
-    plot_filename = f"{model_name_base}_{timestamp_str}.png" 
+    plot_filename = f"{model_name_base}_loss.png" 
     
     epochs = [m['epoch'] for m in metrics]
     losses = [m['loss'] for m in metrics]
@@ -475,7 +461,7 @@ def plot_metrics(metrics, model_path):
 def log_parameters(params: dict):
 
     # 1. Get current timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    #timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # 2. Extract model name from MODEL_PATH
     model_path = params.get('MODEL_PATH', './default_model.pt')
@@ -487,13 +473,15 @@ def log_parameters(params: dict):
     model_name_base = os.path.splitext(model_filename)[0]
     
     # 3. Construct the log file name
-    log_filename = f"{model_name_base}_{timestamp}.txt"
+    log_filename = f"{model_name_base}_parameters.txt"
     
+    log_data = f"{model_name_base}_params_data.json"
+
     # 4. Write parameters to the log file
     try:
         with open(log_filename, 'w') as f:
             f.write(f"--- Training Configuration Log ---\n")
-            f.write(f"Timestamp: {timestamp}\n")
+            #f.write(f"Timestamp: {timestamp}\n")
             f.write(f"Model Path: {model_path}\n")
             f.write("-" * 40 + "\n")
             
@@ -506,3 +494,6 @@ def log_parameters(params: dict):
         print(f"\n✓ Configuration saved to log file: {log_filename}")
     except IOError as e:
         print(f"Error saving log file {log_filename}: {e}")
+    
+    with open(log_data, 'w') as f:
+        json.dump(params, f)

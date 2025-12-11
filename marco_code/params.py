@@ -1,6 +1,7 @@
 import argparse
 from datetime import datetime
 import json
+import os
 
 # Architectural hyperparameters
 DEFAULT_HIDDEN_CHANNELS = 256        
@@ -11,10 +12,10 @@ DEFAULT_NUM_MLP_LAYERS = 3
 DEFAULT_ARCHITECTURE='SageConv' #Options: 'SageConv', 'Gatv2Conv'
 
 # Training Parameters     
-DEFAULT_LEARNING_RATE = 0.001        
+DEFAULT_LEARNING_RATE = 0.005        
 DEFAULT_WEIGHT_DECAY = 5e-4          
 DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 30 
+DEFAULT_EARLY_STOPPING_PATIENCE = 100
 
 # Data Loading 
 DEFAULT_BATCH_SIZE = 512          
@@ -29,7 +30,7 @@ DEFAULT_NUM_TEST = 0.10
 # Learning Rate Scheduler
 DEFAULT_USE_LR_SCHEDULER = True
 DEFAULT_LR_SCHEDULER_FACTOR = 0.5
-DEFAULT_LR_SCHEDULER_PATIENCE = 20
+DEFAULT_LR_SCHEDULER_PATIENCE = 10
 
 #Type of Loss function
 DEFAULT_LOSS = 'L2' # Options: 'L2', 'L1'
@@ -39,7 +40,7 @@ DEFAULT_USE_GRADIENT_CLIPPING = False
 DEFAULT_GRAD_CLIP_VALUE = 1.0
 
 #Embedding Regularization
-DEFAULT_EMB_REG = 1e-4
+DEFAULT_EMB_REG = 5e-4
 
 # Specify which type of Knowledge Jump must be used
 DEFAULT_JK_MODE = 'max'  # Options: 'cat', 'max', 'lstm'
@@ -366,76 +367,70 @@ LOAD_MODEL = args.load_model
 ARCHITECTURE = args.architecture
 LOSS_TYPE = args.loss_type
 
+
+current_params = {
+    'HIDDEN_CHANNELS': args.hidden_channels,
+    'DROPOUT': args.dropout,
+    'AGGREGATION': args.aggregation,
+    'NUM_GNN_LAYERS': args.num_gnn_layers,
+    'NUM_MLP_LAYERS': args.num_mlp_layers,
+    'ARCHITECTURE': args.architecture,
+    'LEARNING_RATE': args.learning_rate,
+    'WEIGHT_DECAY': args.weight_decay,
+    'NUM_EPOCHS': args.num_epochs,
+    'EARLY_STOPPING_PATIENCE': args.early_stopping_patience,
+    'BATCH_SIZE': args.batch_size,
+    'NUM_NEIGHBORS': args.num_neighbors,
+    'NEG_SAMPLING_RATIO': args.neg_sampling_ratio,
+    'NEG_SAMPLING': args.neg_sampling,
+    'NUM_VAL': args.num_val,
+    'NUM_TEST': args.num_test,
+    'DIRNAME_MOVIELENS': args.dirname_movielens,
+    'TAG_AS_EDGE': args.tag_as_edge,
+    'USE_BN': args.use_bn,
+    'EMB_REG': args.emb_reg,
+    'JK_MODE': args.jk_mode,
+    'USE_LR_SCHEDULER': args.use_lr_scheduler,
+    'LR_SCHEDULER_FACTOR': args.lr_scheduler_factor,
+    'LR_SCHEDULER_PATIENCE': args.lr_scheduler_patience,
+    'USE_GRADIENT_CLIPPING': args.use_gradient_clipping,
+    'GRAD_CLIP_VALUE': args.grad_clip_value,
+    'MODALITY': args.modality,
+    'MODEL_PATH': args.model_path,
+    'EMBEDDER_PATH': args.embedder_path,
+    'LOAD_MODEL': args.load_model,
+    'LOSS_TYPE' : args.loss_type,
+    'ARCHITECTURE' : args.architecture
+}
+
 if(TAG_AS_EDGE):
     print('Since using edge that includes tag, switching the GNN architecture to Gatv2Conv')
     ARCHITECTURE = 'Gatv2Conv'
+    current_params['ARCHITECTURE'] = 'Gatv2Conv'
 
 
-current_params = {
-    'HIDDEN_CHANNELS': HIDDEN_CHANNELS,
-    'DROPOUT': DROPOUT,
-    'AGGREGATION': AGGREGATION,
-    'NUM_GNN_LAYERS': NUM_GNN_LAYERS,
-    'NUM_MLP_LAYERS': NUM_MLP_LAYERS,
-    'ARCHITECTURE': ARCHITECTURE,
-    'LEARNING_RATE': LEARNING_RATE,
-    'WEIGHT_DECAY': WEIGHT_DECAY,
-    'NUM_EPOCHS': NUM_EPOCHS,
-    'EARLY_STOPPING_PATIENCE': EARLY_STOPPING_PATIENCE,
-    'BATCH_SIZE': BATCH_SIZE,
-    'NUM_NEIGHBORS': NUM_NEIGHBORS,
-    'NEG_SAMPLING_RATIO': NEG_SAMPLING_RATIO,
-    'NEG_SAMPLING': NEG_SAMPLING,
-    'DIRNAME_MOVIELENS': DIRNAME_MOVIELENS,
-    'TAG_AS_EDGE': TAG_AS_EDGE,
-    'USE_BN': USE_BN,
-    'EMB_REG': EMB_REG,
-    'JK_MODE': JK_MODE,
-    'NUM_VAL': NUM_VAL,
-    'NUM_TEST': NUM_TEST,
-    'USE_LR_SCHEDULER': USE_LR_SCHEDULER,
-    'LR_SCHEDULER_FACTOR': LR_SCHEDULER_FACTOR,
-    'LR_SCHEDULER_PATIENCE': LR_SCHEDULER_PATIENCE,
-    'USE_GRADIENT_CLIPPING': USE_GRADIENT_CLIPPING,
-    'GRAD_CLIP_VALUE': GRAD_CLIP_VALUE,
-    'MODALITY': MODALITY,
-    'MODEL_PATH': MODEL_PATH,
-    'EMBEDDER_PATH': EMBEDDER_PATH,
-    'LOAD_MODEL': LOAD_MODEL,
-    'LOSS_TYPE' : LOSS_TYPE
-}
+if (MODALITY == 'inference'):
+        
+        model_filename = os.path.basename(MODEL_PATH)
+        model_name_base = os.path.splitext(model_filename)[0]
+        log_data = f"{model_name_base}_params_data.json"
+
+        try:
+            with open(log_data, 'r') as f:
+                current_params = json.load(f)    
+                for key, value in current_params.items():
+                    globals()[key] = value
+                    print(f"\n✓ Reading configuration saved in the file: {log_data}, overwriting default and input parameters")
+                MODALITY = 'inference'
+                current_params['MODALITY'] = 'inference'
+        except IOError as e:
+            print(f"Error in loading the config file {log_data}: {e}")
+            print('Trying with input and default parameters')
+
 
 
 # Print all parameters
 print("Configuration:")
-print(f"  Hidden Channels: {HIDDEN_CHANNELS}")
-print(f"  Dropout: {DROPOUT}")
-print(f"  Aggregation: {AGGREGATION}")
-print(f"  Num GNN Layers: {NUM_GNN_LAYERS}")
-print(f"  Num MLP Layers: {NUM_MLP_LAYERS}")
-print(f"  Learning Rate: {LEARNING_RATE}")
-print(f"  Weight Decay: {WEIGHT_DECAY}")
-print(f"  Num Epochs: {NUM_EPOCHS}")
-print(f"  Early Stopping Patience: {EARLY_STOPPING_PATIENCE}")
-print(f"  Batch Size: {BATCH_SIZE}")
-print(f"  Num Neighbors: {NUM_NEIGHBORS}")
-print(f"  Negative Sampling Ratio: {NEG_SAMPLING_RATIO}")
-print(f"  Validation Split: {NUM_VAL}")
-print(f"  Test Split: {NUM_TEST}")
-print(f"  Use LR Scheduler: {USE_LR_SCHEDULER}")
-print(f"  LR Scheduler Factor: {LR_SCHEDULER_FACTOR}")
-print(f"  LR Scheduler Patience: {LR_SCHEDULER_PATIENCE}")
-print(f"  Use Gradient Clipping: {USE_GRADIENT_CLIPPING}")
-print(f"  Gradient Clip Value: {GRAD_CLIP_VALUE}")
-print(f"  Embedding Regularization: {EMB_REG}")
-print(f"  JK Mode: {JK_MODE}")
-print(f"  MovieLens Directory: {DIRNAME_MOVIELENS}")
-print(f"  Embedder Directory: {EMBEDDER_PATH}")
-print(f"  Use Batch Normalization: {USE_BN}")
-print(f"  Tag as Edge: {TAG_AS_EDGE}")
-print(f"  Mode of use is :{MODALITY}")
-print(f"  Model path is :{MODEL_PATH}")
-print(f"  Model Loading is :{LOAD_MODEL}")
-print(f"  GNN architecture is :{ARCHITECTURE}")
-print(f"  Loss type is :{LOSS_TYPE}")
+for key in current_params.keys():
+    print (f"{key} -> {current_params.get(key)}")
 

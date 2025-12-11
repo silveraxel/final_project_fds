@@ -49,19 +49,18 @@ if MODALITY == 'training':
         if patience_counter >= EARLY_STOPPING_PATIENCE:
             print(f'\n✓ Early stopping at epoch {epoch}')
             break
-    plot_metrics(metrics, model_path=MODEL_PATH)
+    plot_metrics(metrics, current_params)
     
 elif MODALITY == 'inference':
 # Load best model
-    model_weights = torch.load(MODEL_PATH)
+    model_weights = torch.load(MODEL_PATH, weights_only = True)
     model.load_state_dict(model_weights)
-
     movies_df = pd.read_csv(movie_path)
 
 
 
     # Run sample predictions with visualization
-    errors, actual, predicted = evaluate_sample_predictions(movies_df, n_users=100, n_samples_per_user=50)
+    errors, actual, predicted = evaluate_sample_predictions(current_params, movies_df, n_users=10, n_samples_per_user=2)
 
 else:
     print('Internal error no valid modality has been defined. Exiting the script')

@@ -5,3 +5,6 @@
 data
 */results/*
 *.txt
+*.json
+*results
+experiments/*
