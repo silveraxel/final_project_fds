@@ -56,7 +56,33 @@ def decade_distribuition():
     plt.close()
 
 
+def top_tag():
+
+    generi = [
+        "In Netflix queue", "atmospheric", "thought-provoking", "superhero", "surreal",
+        "funny", "Disney", "religion", "quirky", "sci-fi"
+    ]
+
+    valori = [
+       131, 36, 24, 24, 23, 23, 23, 22, 21, 21
+    ]
+
+    plt.figure(figsize=(14, 6))
+    plt.bar(generi, valori)
+
+    plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Numero")
+    plt.title("Top 10 Frequency Tag")
+
+    plt.tight_layout()
+
+    plt.savefig("analisi/top_frequency_tag.png", dpi=300, bbox_inches="tight")
+
+    plt.close()
+
+
 
 if __name__ == "__main__":
     genre_distribution()
     decade_distribuition()
+    top_tag()
