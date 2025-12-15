@@ -14,8 +14,9 @@ DEFAULT_ARCHITECTURE='SageConv' #Options: 'SageConv', 'Gatv2Conv'
 # Training Parameters     
 DEFAULT_LEARNING_RATE = 0.005        
 DEFAULT_WEIGHT_DECAY = 5e-4          
-DEFAULT_NUM_EPOCHS = 300             
-DEFAULT_EARLY_STOPPING_PATIENCE = 100
+DEFAULT_NUM_EPOCHS = 500             
+DEFAULT_EARLY_STOPPING_PATIENCE = 50
+DEFAULT_EARLY_STOPPING_WINDOW = 5
 
 # Data Loading 
 DEFAULT_BATCH_SIZE = 512          
@@ -51,15 +52,15 @@ DEFAULT_EMB_REG = 5e-4
 DEFAULT_JK_MODE = 'max'  # Options: 'cat', 'max', 'lstm'
 
 # Specify the folder in which is stored the dataset
-DEFAULT_DIRNAME_MOVIELENS = '../data/movielens/ml-latest-small'
+DEFAULT_DIRNAME_MOVIELENS = '../dataset/'
+#DEFAULT_DIRNAME_MOVIELENS = '../data/movielens/ml-latest-small'
 
 # Specify if using Batch Normalization
 
 DEFAULT_USE_BN = True
 
-# Specify if using movielens TAGS as a feature of the movie or a new edge between user and movie
-
-DEFAULT_TAG_AS_EDGE = True
+# Specify if and how use the tags
+DEFAULT_TAGS = 'edge'       #Options: 'edge', 'feature', 'None'
 
 #Specify modality of the software (Training or Inference)
 
@@ -115,6 +116,14 @@ def parse_arguments():
         type=str, 
         default=DEFAULT_ARCHITECTURE,
         help='GNN architecture to be used'
+    )
+
+    model_group.add_argument(
+        '--tag', 
+        type=str, 
+        default=DEFAULT_TAGS,
+        choices=['edge', 'feature', 'None'],
+        help='How to use tags'
     )
 
     model_group.add_argument(
@@ -225,6 +234,13 @@ def parse_arguments():
         help='Number of epochs to wait before early stopping'
     )
     train_group.add_argument(
+        '--early-stopping-window', 
+        type=int, 
+        default=DEFAULT_EARLY_STOPPING_WINDOW,
+        help='Number of epochs to average for early stopping comparison'
+    )
+
+    train_group.add_argument(
         '--emb-reg', 
         type=float, 
         default=DEFAULT_EMB_REG,
@@ -264,18 +280,6 @@ def parse_arguments():
         type=str, 
         default=DEFAULT_DIRNAME_MOVIELENS,
         help='Directory path for MovieLens dataset'
-    )
-    data_group.add_argument(
-        '--tag-as-edge', 
-        action='store_true', 
-        default=False,
-        help='Use tags as edges in the graph'
-    )
-    data_group.add_argument(
-        '--no-tag-as-edge', 
-        action='store_false', 
-        dest='tag_as_edge',
-        help='Do not use tags as edges'
     )
     
     # Data Split
@@ -384,7 +388,6 @@ EMB_REG = args.emb_reg
 JK_MODE = args.jk_mode
 DIRNAME_MOVIELENS = args.dirname_movielens
 USE_BN = args.use_bn
-TAG_AS_EDGE = args.tag_as_edge
 MODALITY = args.modality
 MODEL_PATH = args.model_path
 EMBEDDER_PATH = args.embedder_path
@@ -394,6 +397,9 @@ LOSS_TYPE = args.loss_type
 LOSS_WEIGHT_TYPE = args.loss_weight_type
 LOSS_MIN_WEIGHT = args.loss_minimum_weight
 LOSS_GAMMA = args.loss_gamma_param
+EARLY_STOPPING_WINDOW = args.early_stopping_window
+TAGS = args.tag
+
 
 current_params = {
     'HIDDEN_CHANNELS': args.hidden_channels,
@@ -413,7 +419,6 @@ current_params = {
     'NUM_VAL': args.num_val,
     'NUM_TEST': args.num_test,
     'DIRNAME_MOVIELENS': args.dirname_movielens,
-    'TAG_AS_EDGE': args.tag_as_edge,
     'USE_BN': args.use_bn,
     'EMB_REG': args.emb_reg,
     'JK_MODE': args.jk_mode,
@@ -429,10 +434,12 @@ current_params = {
     'LOSS_TYPE' : args.loss_type,
     'LOSS_WEIGHT_TYPE' :args.loss_weight_type,
     'LOSS_MIN_WEIGHT' : args.loss_minimum_weight,
-    'LOSS_GAMMA' : args.loss_gamma_param
+    'LOSS_GAMMA' : args.loss_gamma_param,
+    'EARLY_STOPPING_WINDOW': args.early_stopping_window,
+    'TAGS': args.tag
 }
 
-if(TAG_AS_EDGE):
+if(TAGS == 'edge'):
     print('Since using edge that includes tag, switching the GNN architecture to Gatv2Conv')
     ARCHITECTURE = 'Gatv2Conv'
     current_params['ARCHITECTURE'] = 'Gatv2Conv'
@@ -446,12 +453,15 @@ if (MODALITY == 'inference'):
 
         try:
             with open(log_data, 'r') as f:
-                current_params = json.load(f)    
+                current_params = json.load(f)
+                current_params['MODEL_PATH'] = MODEL_PATH    
                 for key, value in current_params.items():
                     globals()[key] = value
                     print(f"\n✓ Reading configuration saved in the file: {log_data}, overwriting default and input parameters")
                 MODALITY = 'inference'
                 current_params['MODALITY'] = 'inference'
+                
+
         except IOError as e:
             print(f"Error in loading the config file {log_data}: {e}")
             print('Trying with input and default parameters')
@@ -469,20 +479,22 @@ elif (MODALITY == 'training' and LOAD_MODEL):
                 current_params['NUM_MLP_LAYERS']  = loaded_params['NUM_MLP_LAYERS']
                 current_params['NUM_GNN_LAYERS']  = loaded_params['NUM_GNN_LAYERS']
                 current_params['ARCHITECTURE']    = loaded_params['ARCHITECTURE']
-                current_params['TAG_AS_EDGE']     = loaded_params['TAG_AS_EDGE']
+                current_params['TAGS']            = loaded_params['TAGS']
                 current_params['EMBEDDER_PATH']   = loaded_params['EMBEDDER_PATH']
                 current_params['LOSS_TYPE']       = loaded_params['LOSS_TYPE']
                 current_params['HIDDEN_CHANNELS'] = loaded_params['HIDDEN_CHANNELS']
                 current_params['AGGREGATION']     = loaded_params['AGGREGATION']
-                
+                current_params['MODEL_PATH']      = loaded_params['MODEL_PATH']
+
                 NUM_MLP_LAYERS  = current_params['NUM_MLP_LAYERS']
                 NUM_GGN_LAYERS  = current_params['NUM_GNN_LAYERS']
                 ARCHITECTURE    = current_params['ARCHITECTURE']
-                TAG_AS_EDGE     = current_params['TAG_AS_EDGE']
                 EMBEDDER_PATH   = current_params['EMBEDDER_PATH']
                 LOSS_TYPE       = current_params['LOSS_TYPE']
                 HIDDEN_CHANNELS = current_params['HIDDEN_CHANNELS']
                 AGGREGATION     = current_params['AGGREGATION']
+                MODEL_PATH      = current_params['MODEL_PATH']
+                TAGS            = current_params['TAGS']
 
         except IOError as e:
             print(f"Error in loading the config file {log_data}: {e}")
