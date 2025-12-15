@@ -273,14 +273,30 @@ def test(loader):
     model.eval()
     total_loss = 0
     total_examples = 0
-    
+
+    #Loss definition
+    if LOSS_TYPE == 'L2':
+        criterion = torch.nn.MSELoss()
+    elif LOSS_TYPE == 'L1':
+        criterion = torch.nn.L1Loss()
+    elif LOSS_TYPE == 'L2_weighted':
+        criterion = WeightedMSELoss(weight_type=LOSS_WEIGHT_TYPE,min_weight=LOSS_MIN_WEIGHT,rating_scale=5.0)
+    elif LOSS_TYPE == 'L2_focal':
+        criterion = FocalMSELoss(
+        rating_weight=LOSS_WEIGHT_TYPE,
+        gamma=LOSS_GAMMA,
+        rating_scale=5.0)
+    else:
+        print('Not defined a loss function. Exiting the script')
+        exit(1)
+
     for batch in loader:
         batch = batch.to(device)
         
         pred = model(batch)
         ground_truth = batch['user', 'rates', 'movie'].edge_label.squeeze().float()
         
-        loss = F.mse_loss(pred, ground_truth)
+        loss = criterion(pred,ground_truth)
         
         total_loss += float(loss) * pred.numel()
         total_examples += pred.numel()

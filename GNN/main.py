@@ -23,14 +23,15 @@ if MODALITY == 'training':
         val_rmse_history.append(val_rmse)
         train_val_gap = val_rmse - train_rmse
 
-        if USE_LR_SCHEDULER:
-            scheduler.step(val_rmse)
-
         if len(val_rmse_history) >= EARLY_STOPPING_WINDOW:
             current_window_mean = sum(val_rmse_history[-EARLY_STOPPING_WINDOW:]) / EARLY_STOPPING_WINDOW
         else:
             # If we don't have enough history yet, use all available
             current_window_mean = sum(val_rmse_history) / len(val_rmse_history)
+
+        if USE_LR_SCHEDULER:
+            #scheduler.step(val_rmse)
+            scheduler.step(current_window_mean)
 
         if current_window_mean < best_val_rmse:
             best_val_rmse = current_window_mean
