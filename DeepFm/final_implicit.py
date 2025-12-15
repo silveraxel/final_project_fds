@@ -1,5 +1,8 @@
 #Implicit model means that we dont use the actual rating but some labels that tell us if a user have seen a film
 #and gave to it a good rating(in our case >=4)
+#Before runnig this code check the path to the dataset
+#to run this code just run this line python final_implicit.py
+#To apply gridsearch just run this line  python final_implicit.py --grid_search 1
 import argparse
 import os
 import random
@@ -28,7 +31,7 @@ def seed_everything(seed: int = 42):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-def extract_year(title):
+def extract_year(title):#example of a title: "Toy Story (1995)"
     match = re.search(r'\((\d{4})\)', title)
     return int(match.group(1)) if match else np.nan
 
@@ -42,11 +45,7 @@ def ensure_dir(path):
 # Compute MiniLM title embeddings (cached recommended)
 # -----------------------------
 def compute_title_embeddings(movie_df, model_name='all-MiniLM-L6-v2', device='cpu', cache_path=None):
-    """
-    movie_df must have a 'title' column (cleaned).
-    Returns numpy array shape (num_movies, dim).
-    If cache_path given and exists, loads cached npy.
-    """
+    # We encode movie titles using a pretrained MiniLM model to capture
     if cache_path is not None and os.path.exists(cache_path):
         print(f"Loading cached MiniLM embeddings from {cache_path}")
         return np.load(cache_path)
@@ -62,9 +61,10 @@ def compute_title_embeddings(movie_df, model_name='all-MiniLM-L6-v2', device='cp
 # -----------------------------
 # Data loading & preprocessing
 # -----------------------------
-def load_movielens(ratings_path: str = "ratings.csv", strategy: str = "last"):
+def load_rating(ratings_path: str = "ratings.csv", strategy: str = "last"):
     df = pd.read_csv(ratings_path, sep=",")
     assert {"userId", "movieId", "rating"}.issubset(df.columns), "ratings.csv missing required columns"
+    # To remove duplicate ratings of a movie by a single user
     if df.duplicated(subset=["userId", "movieId"]).any():
         if strategy == "last":
             df = df.sort_values("timestamp").drop_duplicates(subset=["userId", "movieId"], keep="last")
@@ -78,8 +78,9 @@ def load_movie(movies_path="movies.csv"):
     movies = pd.read_csv(movies_path, sep=",")
     movies["genre_list"] = movies["genres"].apply(lambda g: g.split("|") if isinstance(g, str) else [])
     movies["year"] = movies["title"].apply(extract_year)
-    # create cleaned title (remove year)
+    # Create cleaned title
     movies["title"] = movies["title"].apply(remove_year_from_title)
+    # Hot-encoding of genres
     mlb = MultiLabelBinarizer()
     genres_multi_hot = mlb.fit_transform(movies['genre_list'])
     genres_multi_hot = pd.DataFrame(genres_multi_hot, columns=mlb.classes_, index=movies.index)
@@ -87,7 +88,9 @@ def load_movie(movies_path="movies.csv"):
     genre_cols = list(mlb.classes_)
     return movies[['movieId', 'year', 'title'] + genre_cols], genre_cols
 
-def leave_k_out_train_val_test(df: pd.DataFrame, k_test: int = 1, k_val: int = 1):
+# Function to split dataset in train/test/val
+def leave_k_out_train_val_test(df: pd.DataFrame, k_test: float = 0.1, k_val: float = 0.1):
+    # Splitting the dataset s.t. past interaction are used to train the model and the latest as test and validation 
     df = df.sort_values(["user_idx", "timestamp"]) if "timestamp" in df.columns else df
     def get_split_counts(n, k_val, k_test):
         if isinstance(k_val, float) and 0 < k_val < 1:
@@ -108,7 +111,8 @@ def leave_k_out_train_val_test(df: pd.DataFrame, k_test: int = 1, k_val: int = 1
     train_df = df.drop(val_indices + test_indices).reset_index(drop=True)
     return train_df, test_df, val_df
 
-def map_and_binarize(raw_rating: pd.DataFrame, raw_movie: pd.DataFrame, genre_cols, k_test: int = 1, k_val: int = 1, threshold: float = 4.0):
+def map_and_binarize(raw_rating: pd.DataFrame, raw_movie: pd.DataFrame, genre_cols, k_test: float = 0.1, k_val: float = 0.1, threshold: float = 4.0):
+    # Feature extraction for the implicit reccomendation system
     df = raw_rating.copy()
     df["label"] = (df["rating"] >= threshold).astype(int)
     users = np.sort(df["userId"].unique())
@@ -120,12 +124,15 @@ def map_and_binarize(raw_rating: pd.DataFrame, raw_movie: pd.DataFrame, genre_co
     df = df.merge(raw_movie[['movieId', 'year'] + genre_cols], on='movieId', how='left')
     if df['year'].isnull().any():
         df['year'] = df['year'].fillna(df['year'].median())
+    # Split dataset in train/test/val
     train_df, test_df, val_df = leave_k_out_train_val_test(df, k_test=k_test, k_val=k_val)
+    # Dense features
     movie_stats = (train_df.groupby("item_idx")["rating"].agg(avg_movie_rating="mean", count_movie_rating="count").reset_index())
     user_stats = (train_df.groupby("user_idx")["rating"].agg(avg_user_rating="mean", count_user_rating="count").reset_index())
     train_df = train_df.merge(movie_stats, on="item_idx", how="left").merge(user_stats, on="user_idx", how="left")
     val_df = val_df.merge(movie_stats, on="item_idx", how="left").merge(user_stats, on="user_idx", how="left")
     test_df = test_df.merge(movie_stats, on="item_idx", how="left").merge(user_stats, on="user_idx", how="left")
+    # Filling null value to prevent the crashing of the model and also too help cold start
     global_movie_avg = train_df["avg_movie_rating"].mean() if not train_df["avg_movie_rating"].isnull().all() else 0.0
     global_movie_count = train_df["count_movie_rating"].mean() if "count_movie_rating" in train_df.columns else 0.0
     global_user_avg = train_df["avg_user_rating"].mean() if not train_df["avg_user_rating"].isnull().all() else 0.0
@@ -147,6 +154,8 @@ def map_and_binarize(raw_rating: pd.DataFrame, raw_movie: pd.DataFrame, genre_co
 # -----------------------------
 # Negative sampling utilities
 # -----------------------------
+# Dynamically generates negative samples at each epoch by pairing users with items they have not interacted with
+# Prevents the model from overfitting to a fixed set of negatives
 class DynamicNegativeSampler:
     def __init__(self, train_pos_df: pd.DataFrame, num_items: int, num_neg: int = 4, feature_cols=None, seed: int = 42):
         self.train_pos_df = train_pos_df.copy()
@@ -166,6 +175,7 @@ class DynamicNegativeSampler:
                       .drop_duplicates("item_idx").set_index("item_idx"))
         user_feats = (self.train_pos_df[["user_idx", "avg_user_rating", "count_user_rating"]]
                       .drop_duplicates("user_idx").set_index("user_idx"))
+        # For each positive interaction, sample K unseen items for the same user.
         for (_, row) in self.pos_df.iterrows():
             u = int(row.user_idx)
             watched = self.user_pos.get(u, set())
@@ -181,6 +191,7 @@ class DynamicNegativeSampler:
             neg_df = neg_df.merge(item_feats.reset_index(), on="item_idx", how="left")
         if not neg_df.empty and user_feats is not None:
             neg_df = neg_df.merge(user_feats.reset_index(), on="user_idx", how="left")
+        # Filling null value to prevent the crashing of the model and also too help cold start
         global_movie_avg = self.train_pos_df["avg_movie_rating"].mean() if not self.train_pos_df["avg_movie_rating"].isnull().all() else 0.0
         global_movie_count = self.train_pos_df["count_movie_rating"].mean() if "count_movie_rating" in self.train_pos_df.columns else 0.0
         global_user_avg = self.train_pos_df["avg_user_rating"].mean() if not self.train_pos_df["avg_user_rating"].isnull().all() else 0.0
@@ -197,6 +208,7 @@ class DynamicNegativeSampler:
 # Dataset
 # -----------------------------
 class RecDataset(Dataset):
+    # Torch dataset that aligns all user, item, and side-information features into a single training sample
     def __init__(self, df: pd.DataFrame, agg_cols, genre_cols, minilm_matrix=None):
         self.users = df['user_idx'].values.astype(np.int64)
         self.items = df['item_idx'].values.astype(np.int64)
@@ -242,7 +254,7 @@ class RecDataset(Dataset):
         return sample
 
 # -----------------------------
-# DeepFM with MiniLM title vectors (no token embedding)
+# DeepFM
 # -----------------------------
 class DeepFM(nn.Module):
     def __init__(self, num_genres, num_agg, num_users, num_items, title_dim=384, emb_dim=32, mlp_dims=(64, 32),
@@ -254,11 +266,12 @@ class DeepFM(nn.Module):
         self.user_emb = nn.Embedding(num_users, emb_dim)
         self.item_emb = nn.Embedding(num_items, emb_dim)
         # project MiniLM (title) vector to emb_dim
+        # proj from 
         self.minilm_proj =  nn.Sequential(
             nn.Linear(384, 128),
             nn.ReLU(),
-            nn.Linear(128, emb_dim)  # emb_dim = 32
-        )
+            nn.Linear(128, emb_dim)  
+        ) 
         self.user_bias = nn.Embedding(num_users, 1)
         self.item_bias = nn.Embedding(num_items, 1)
         input_dim = emb_dim * 4 + num_agg
@@ -304,7 +317,7 @@ class DeepFM(nn.Module):
                 if layer.bias is not None:
                     nn.init.constant_(layer.bias, 0.0) 
 
-    def fm_interaction(self, vectors):
+    def fm_interaction(self, vectors): # FM layer: captures low-order feature interactions
         sum_fields = torch.sum(vectors, dim=1)
         sum_square = sum_fields * sum_fields
         square_sum = torch.sum(vectors * vectors, dim=1)
@@ -322,6 +335,7 @@ class DeepFM(nn.Module):
             i_e = self.emb_dropout(i_e)
         genre_embeddings = self.genre_emb.weight.unsqueeze(0).expand(user.size(0), -1, -1)
         query = (u_e + i_e).unsqueeze(1)
+        # Attention over genres: learns which genres matter for a user-item pair
         attn_out, _ = self.attn(query, genre_embeddings, genre_embeddings)
         g_emb = attn_out.squeeze(1)
         u_b = self.user_bias(user)
@@ -329,6 +343,7 @@ class DeepFM(nn.Module):
         fm_vecs = torch.stack([u_e, i_e, g_emb,ml], dim=1)
         fm_out = self.fm_interaction(fm_vecs)
         concat = torch.cat([u_e, i_e, g_emb, dense_feats,ml], dim=1)
+        # DNN: captures higher-order nonlinear interactions
         dnn_out = self.dnn(concat)
         out = u_b + i_b + fm_out + dnn_out
         return out.squeeze(1)
@@ -336,6 +351,8 @@ class DeepFM(nn.Module):
 # -----------------------------
 # Evaluation metrics
 # -----------------------------
+# HR@K and NDCG@K are ranking-based metrics suitable for implicit feedback.
+# They measure whether the true held-out item is ranked highly among a large set of unobserved candidate items
 def hit_rate_at_k(recs, truth, k):
     return int(truth in recs[:k])
 
@@ -420,7 +437,7 @@ def train_with_dynamic_negatives(agg_cols, genre_cols, genre_matrix, agg_matrix,
     return model, pd.DataFrame(history)
 
 # -----------------------------
-# Grid Search helper
+# Grid Search
 # -----------------------------
 def run_grid_search(agg_cols, genre_cols, genre_matrix, agg_matrix, minilm_matrix, df, num_users, num_items, test_df,val_df, param_grid, out_csv='grid_search_results.csv', device='cpu'):
     rows = []; total = 0
@@ -460,12 +477,12 @@ def run_grid_search(agg_cols, genre_cols, genre_matrix, agg_matrix, minilm_matri
 # -----------------------------
 def main(args):
     seed_everything(args.seed)
-    raw_rating = load_movielens(args.ratings)
+    raw_rating = load_rating(args.ratings)
     raw_movie, genre_cols = load_movie(args.movies)
-    # compute MiniLM embeddings (cache recommended)
+    # Compute MiniLM embeddings
     print("Computing MiniLM embeddings for titles (or loading cache)...") 
     device_name = 'cuda' if torch.cuda.is_available() and args.use_cuda else 'cpu'
-    # optional: pass cache path via args if you want to reuse
+    # Optional: pass cache path via args if you want to reuse
     cache_path = args.minilm_cache if hasattr(args, 'minilm_cache') else None
     minilm_emb = compute_title_embeddings(raw_movie, device=device_name, cache_path=cache_path)  # numpy (n_movies, 384)
     train_pos_df, val_df, test_df, num_users, num_items, agg_cols, u2i, m2i = map_and_binarize(raw_rating, raw_movie, genre_cols, k_test=0.1, k_val=0.1, threshold=args.threshold)
@@ -485,7 +502,7 @@ def main(args):
         if mid in raw_movie_idx:
             minilm_matrix[item_idx] = minilm_emb[raw_movie_idx[mid]]
 
-    if args.grid_search:#TO BE FIXED
+    if args.grid_search:#if runned with option: --grid_search 1
         param_grid = {
             'embed_dim': args.grid_embed_dim,
             'mlp_dims': args.grid_mlp_dims,
@@ -511,7 +528,7 @@ def main(args):
         print("Grid search finished. Results:\n", results)
         return
     
-    # model + train
+    # Quick execution (model + train + evaluate)
     model = DeepFM(len(genre_cols), len(agg_cols), num_users, num_items, title_dim=minilm_matrix.shape[1], emb_dim=args.embed_dim, mlp_dims=tuple(args.mlp_dims), dropout=0.2, use_batchnorm=True, emb_dropout=0.05, init_method='kaiming')
     device = 'cuda' if torch.cuda.is_available() and args.use_cuda else 'cpu'
     model.to(device)
@@ -522,8 +539,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ratings', type=str, default='ratings.csv')
-    parser.add_argument('--movies', type=str, default='movies.csv')
+    parser.add_argument('--ratings', type=str, default='../dataset/ratings.csv')
+    parser.add_argument('--movies', type=str, default='../dataset/movies.csv')
     parser.add_argument('--threshold', type=float, default=4.0, help='binarization threshold (>=)')
     parser.add_argument('--epochs', type=int, default=30)
     parser.add_argument('--batch_size', type=int, default=1024)
@@ -557,6 +574,3 @@ if __name__ == '__main__':
         args.epochs = 5
         args.batch_size = 2048
     main(args)
-#//96,"(128, 64, 32)",20,1024,0.0007,1e-06,4,5,42,0.05245901639344262,0.027977253159459804
-#//96,"(128, 64, 32)",20,1024,0.0005,1e-06,4,5,42,0.05081967213114754,0.028285359269776454
-#//96,"(128, 64, 32)",20,1024,0.0003,1e-06,4,5,42,0.060655737704918035,0.028210943292361883
