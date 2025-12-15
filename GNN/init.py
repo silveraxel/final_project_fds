@@ -4,11 +4,9 @@ movie_path = os.path.join(DIRNAME_MOVIELENS,'movies.csv')
 rating_path = os.path.join(DIRNAME_MOVIELENS,'ratings.csv')
 tags_path = os.path.join(DIRNAME_MOVIELENS,'tags.csv')
 
-#IF USING TAGS AS NEW EDGE BETWEEN USER AND MOVIE
 user_x, user_mapping = load_node_csv(rating_path, index_col='userId')
 
-
-if TAG_AS_EDGE:
+if TAGS == 'edge':
     print("\nLoading tags data and creating tag edges...")
     movie_x, movie_mapping = load_node_csv(
         movie_path, index_col='movieId', encoders={
@@ -58,8 +56,7 @@ if TAG_AS_EDGE:
         tags_enabled = False
 
 
-else:
-#IF USING TAGS AS MOVIE NEW FEATURE
+elif TAGS == 'feature':
 
 # First get movie mapping (needed for tag encoder)
     movies_df = pd.read_csv(movie_path)
@@ -77,7 +74,6 @@ else:
             'tags': AggregatedTagEncoder(tags_path, movie_mapping, local_path=EMBEDDER_PATH)  # NEW: Tags as movie features
         })
 
-
     edge_index, edge_label = load_edge_csv(
         rating_path,
         src_index_col='userId',
@@ -86,7 +82,26 @@ else:
         dst_mapping=movie_mapping,
         encoders={'rating': IdentityEncoder(dtype=torch.long)},
     )
+elif TAGS == 'None':
+    # Load movie features WITHOUT tags
+    print("\nLoading movie features without tags...")
+    movie_x, movie_mapping = load_node_csv(
+        movie_path, index_col='movieId', encoders={
+            'title': SequenceEncoder(local_path=EMBEDDER_PATH),
+            'genres': GenresEncoder()
+        })
 
+    edge_index, edge_label = load_edge_csv(
+        rating_path,
+        src_index_col='userId',
+        src_mapping=user_mapping,
+        dst_index_col='movieId',
+        dst_mapping=movie_mapping,
+        encoders={'rating': IdentityEncoder(dtype=torch.long)},
+    )    
+else:
+    print('Something went wrong, not defined the use of tags file. Exiting the program')
+    exit(1)
 
 data = HeteroData()
 
@@ -100,7 +115,7 @@ data['user', 'rates', 'movie'].edge_index = edge_index
 data['user', 'rates', 'movie'].edge_label = edge_label
 
 # Tag edges (user --[tags]--> movie)
-if TAG_AS_EDGE:
+if TAGS == 'edge':
     data['user', 'tags', 'movie'].edge_index = tag_edge_index
     data['user', 'tags', 'movie'].edge_attr = tag_edge_attr
     print(f"\n✓ Added 'tags' edge type to the graph")
@@ -111,7 +126,7 @@ print(data)
 # Add reverse edges
 data = ToUndirected()(data)
 del data['movie', 'rev_rates', 'user'].edge_label
-if TAG_AS_EDGE:
+if TAGS == 'edge':
     del data['movie', 'rev_tags', 'user'].edge_label
 
 # Split data
@@ -513,6 +528,7 @@ def plot_metrics(metrics, params: dict):
     losses = [m['loss'] for m in metrics]
     train_rmses = [m['train_rmse'] for m in metrics]
     val_rmses = [m['val_rmse'] for m in metrics]
+    val_rmses_mean = [m['current_window_mean'] for m in metrics]
     
     # Create figure with two subplots
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
@@ -526,13 +542,16 @@ def plot_metrics(metrics, params: dict):
     axes[0].grid(True, alpha=0.3)
     
     # Subplot 2: RMSE (Train vs. Validation)
+    
     axes[1].plot(epochs, train_rmses, label='Train RMSE', color='orange')
     axes[1].plot(epochs, val_rmses, label='Validation RMSE', color='red')
+    axes[1].plot(epochs, val_rmses_mean, label='Mean Validation RMSE', color='blue')
+
     
-    # Find the best validation RMSE for annotation
+    # Find the best validation MEAN RMSE for annotation
     if val_rmses:
-        best_val = min(val_rmses)
-        best_epoch = epochs[val_rmses.index(best_val)]
+        best_val = min(val_rmses_mean)
+        best_epoch = epochs[val_rmses_mean.index(best_val)]
         axes[1].axvline(x=best_epoch, color='gray', linestyle='--', label=f'Best Val Epoch ({best_epoch})')
     
     axes[1].set_xlabel('Epoch')

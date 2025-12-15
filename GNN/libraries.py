@@ -14,7 +14,7 @@ from torch_geometric.nn import JumpingKnowledge
 from torch_geometric.nn import GATv2Conv
 from params import *
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-
+#from refactored_visualizer import EdgeInfluenceVisualizer
 
 
 def load_node_csv(path, index_col, encoders=None, **kwargs):
