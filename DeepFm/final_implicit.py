@@ -576,6 +576,67 @@ def plot_training_curves(history_df, hr_test, ndcg_test):
     plt.tight_layout()
     plt.savefig("./plot/training_ndcg.png", dpi=300)
     plt.close()
+
+# -----------------------------
+# Plot functions
+# -----------------------------
+
+@torch.no_grad()
+def inspect_random_user(
+    m2i,
+    model,
+    train_pos_df,
+    raw_movie_df,
+    num_items,
+    genre_matrix,
+    agg_matrix,
+    minilm_matrix,
+    K=10,
+    device='cpu'
+):
+    model.eval()
+    model.to(device)
+
+    # --- build mappings ---
+    idx2movie = raw_movie_df.set_index('movieId')['title'].to_dict()
+    item_idx2movieId = {v: k for k, v in m2i.items()}
+
+    # --- pick random user ---
+    user = random.choice(train_pos_df['user_idx'].unique().tolist())
+
+    # --- movies the user has seen ---
+    seen_items = train_pos_df[
+        (train_pos_df.user_idx == user) & (train_pos_df.label == 1)
+    ]['item_idx'].unique().tolist()
+
+    print(f"\n👤 User {user}")
+    print("🎬 SEEN movies:")
+    for it in seen_items[:10]:  # limit output
+        mid = item_idx2movieId[it]
+        print("  -", idx2movie.get(mid, "Unknown"))
+
+    # --- candidate items (unseen) ---
+    unseen_items = np.setdiff1d(
+        np.arange(num_items),
+        np.array(seen_items)
+    )
+
+    user_tensor = torch.tensor([user] * len(unseen_items), device=device)
+    item_tensor = torch.tensor(unseen_items, device=device)
+
+    g = torch.tensor(genre_matrix[unseen_items], device=device)
+    a = torch.tensor(agg_matrix[unseen_items], device=device)
+    ml = torch.tensor(minilm_matrix[unseen_items], device=device)
+
+    scores = model(user_tensor, item_tensor, g, a, ml).cpu().numpy()
+    topk_idx = np.argsort(-scores)[:K]
+    topk_items = unseen_items[topk_idx]
+
+    print("\n⭐ RECOMMENDED movies:")
+    for rank, it in enumerate(topk_items, 1):
+        mid = item_idx2movieId[it]
+        print(f"  {rank}. {idx2movie.get(mid, 'Unknown')}")
+
 # -----------------------------
 # Main CLI
 # -----------------------------
@@ -642,6 +703,19 @@ def main(args):
     print(f"Final TEST HR@{args.K}: {hr_test:.4f} | NDCG@{args.K}: {ndcg_test:.4f}")
     # plot 
     if args.plot: plot_training_curves(history,hr_test,ndcg_test)
+    # user reccomendation 
+    if args.user: inspect_random_user(
+        m2i,
+        model=model,
+        train_pos_df=train_pos_df,
+        raw_movie_df=raw_movie,
+        num_items=num_items,
+        genre_matrix=genre_matrix,
+        agg_matrix=agg_matrix,
+        minilm_matrix=minilm_matrix,
+        K=10,
+        device=device
+    )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -658,9 +732,10 @@ if __name__ == '__main__':
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
     parser.add_argument('--K', type=int, default=10)
+    parser.add_argument('--plot', type=int, default=0)
+    parser.add_argument('--user', type=int, default=0)
     parser.add_argument('--use_cuda', action='store_true')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--plot', type=int, default=0)
 
     parser.add_argument('--grid_search', type=int, default=0)
     parser.add_argument('--grid_embed_dim', type=int, nargs='*', default=[24,32,48,96])
