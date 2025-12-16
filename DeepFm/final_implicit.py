@@ -20,6 +20,7 @@ from sentence_transformers import SentenceTransformer
 from torch.nn import MultiheadAttention
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
+import matplotlib.pyplot as plt
 
 # -----------------------------
 # Utilities function
@@ -61,7 +62,7 @@ def compute_title_embeddings(movie_df, model_name='all-MiniLM-L6-v2', device='cp
 # -----------------------------
 # Data loading & preprocessing
 # -----------------------------
-def load_rating(ratings_path: str = "ratings.csv", strategy: str = "last"):
+def load_rating(ratings_path: str = "../dataset/ratings.csv", strategy: str = "last"):
     df = pd.read_csv(ratings_path, sep=",")
     assert {"userId", "movieId", "rating"}.issubset(df.columns), "ratings.csv missing required columns"
     # To remove duplicate ratings of a movie by a single user
@@ -74,7 +75,7 @@ def load_rating(ratings_path: str = "ratings.csv", strategy: str = "last"):
             raise ValueError("strategy must be 'last' or 'avg'")
     return df
 
-def load_movie(movies_path="movies.csv"):
+def load_movie(movies_path="../dataset/movies.csv"):
     movies = pd.read_csv(movies_path, sep=",")
     movies["genre_list"] = movies["genres"].apply(lambda g: g.split("|") if isinstance(g, str) else [])
     movies["year"] = movies["title"].apply(extract_year)
@@ -362,32 +363,59 @@ def ndcg_at_k(recs, truth, k):
         return 1.0 / math.log2(rank + 2)
     return 0.0
 
+# Evaluation like the NeuMF-style evaluation PAPER, only 99 negatives at most
 @torch.no_grad()
-def evaluate_model(model, train_user_pos: dict, test_df: pd.DataFrame, num_items: int, genre_matrix, agg_matrix, minilm_matrix, k: int = 10, device: str = 'cpu'):
+def evaluate_model(
+    model, train_user_pos: dict, test_df: pd.DataFrame,
+    num_items: int, genre_matrix, agg_matrix, minilm_matrix,
+    k: int = 10, num_neg: int = 99, device: str = 'cpu'
+):
     model.to(device)
     model.eval()
+
     users = test_df['user_idx'].unique()
-    HRs = []
-    NDCGs = []
+    HRs, NDCGs = [], []
+
     genre_tensor = torch.tensor(genre_matrix, dtype=torch.float, device=device)
     agg_tensor = torch.tensor(agg_matrix, dtype=torch.float, device=device)
     minilm_tensor = torch.tensor(minilm_matrix, dtype=torch.float, device=device)
+
     for u in users:
         truth = int(test_df[test_df['user_idx'] == u]['item_idx'].iloc[0])
-        seen = train_user_pos.get(u, set())
-        candidates = np.setdiff1d(np.arange(num_items, dtype=np.int64), np.array(list(seen), dtype=np.int64))
+
+        seen = set(train_user_pos.get(u, set()))
+        seen.discard(truth)
+
+        unseen_items = np.setdiff1d(
+            np.arange(num_items, dtype=np.int64),
+            np.array(list(seen), dtype=np.int64)
+        )
+
+        if len(unseen_items) == 0:
+            HRs.append(0); NDCGs.append(0)
+            continue
+
+        num_negatives = min(num_neg, len(unseen_items))
+        negatives = np.random.choice(unseen_items, size=num_negatives, replace=False)
+
+        candidates = np.concatenate(([truth], negatives))
         if len(candidates) == 0:
             HRs.append(0); NDCGs.append(0); continue
+    
         user_tensor = torch.tensor([u] * len(candidates), dtype=torch.long, device=device)
         item_tensor = torch.tensor(candidates, dtype=torch.long, device=device)
+
         g = genre_tensor[item_tensor]
         a = agg_tensor[item_tensor]
         ml = minilm_tensor[item_tensor]
+
         scores = model(user_tensor, item_tensor, g, a, ml).cpu().numpy()
         ranked_idx = np.argsort(-scores)
-        recs = [candidates[i] for i in ranked_idx.tolist()]
+        recs = candidates[ranked_idx].tolist()
+
         HRs.append(hit_rate_at_k(recs, truth, k))
         NDCGs.append(ndcg_at_k(recs, truth, k))
+
     return float(np.mean(HRs)), float(np.mean(NDCGs))
 
 # -----------------------------
@@ -473,6 +501,47 @@ def run_grid_search(agg_cols, genre_cols, genre_matrix, agg_matrix, minilm_matri
     return results_df
 
 # -----------------------------
+# Plot functions
+# -----------------------------
+def plot_training_curves(history_df,hr_test,ndcg_test):
+    os.makedirs("./plot", exist_ok=True)
+    epochs = history_df['epoch']
+
+    plt.figure()
+    plt.plot(epochs, history_df['loss'], marker='o')
+    plt.xlabel("Epoch")
+    plt.ylabel("BCE Loss")
+    plt.title("Training Loss vs Epoch")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("./plot/training_loss.png", dpi=300)
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs, history_df['hr_val'], marker='o', label="Validation HR@10")
+    if hr_test is not None:
+        plt.axhline(hr_test, linestyle='--',color='red',linewidth=2, label=f"Test HR@10 = {hr_test:.4f}")
+    plt.xlabel("Epoch")
+    plt.ylabel("HR@10")
+    plt.title("Validation HR@10 vs Epoch")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("./plot/training_hr.png", dpi=300)
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs, history_df['ndcg_val'], marker='o', label="Validation NDCG@10")
+    if ndcg_test is not None:
+        plt.axhline(ndcg_test, linestyle='--',color='red',linewidth=2, label=f"Test NDCG@10 = {ndcg_test:.4f}")
+    plt.xlabel("Epoch")
+    plt.ylabel("NDCG@10")
+    plt.title("Validation NDCG@10 vs Epoch")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("./plot/training_ndcg.png", dpi=300)
+    plt.close()
+
+# -----------------------------
 # Main CLI
 # -----------------------------
 def main(args):
@@ -534,8 +603,10 @@ def main(args):
     model.to(device)
     model, history = train_with_dynamic_negatives(agg_cols, genre_cols, genre_matrix, agg_matrix, minilm_matrix, model, train_pos_df, val_df, num_users, num_items, epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, weight_decay=args.weight_decay, num_neg=args.num_neg, device=device, patience=args.patience, checkpoint_dir=args.checkpoint_dir)
     train_user_pos_map = train_pos_df[train_pos_df['label'] == 1].groupby('user_idx')['item_idx'].apply(set).to_dict()
-    hr, ndcg = evaluate_model(model, train_user_pos_map, test_df, num_items, genre_matrix, agg_matrix, minilm_matrix, k=args.K, device=device)
-    print(f"Final TEST HR@{args.K}: {hr:.4f} | NDCG@{args.K}: {ndcg:.4f}")
+    hr_test, ndcg_test = evaluate_model(model, train_user_pos_map, test_df, num_items, genre_matrix, agg_matrix, minilm_matrix, k=args.K, device=device)
+    print(f"Final TEST HR@{args.K}: {hr_test:.4f} | NDCG@{args.K}: {ndcg_test:.4f}")
+    # plot 
+    if args.plot: plot_training_curves(history,hr_test,ndcg_test)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -554,6 +625,7 @@ if __name__ == '__main__':
     parser.add_argument('--K', type=int, default=10)
     parser.add_argument('--use_cuda', action='store_true')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--plot', type=int, default=0)
 
     parser.add_argument('--grid_search', type=int, default=0)
     parser.add_argument('--grid_embed_dim', type=int, nargs='*', default=[24,32,48,96])
