@@ -503,44 +503,79 @@ def run_grid_search(agg_cols, genre_cols, genre_matrix, agg_matrix, minilm_matri
 # -----------------------------
 # Plot functions
 # -----------------------------
-def plot_training_curves(history_df,hr_test,ndcg_test):
+def plot_training_curves(history_df, hr_test, ndcg_test):
     os.makedirs("./plot", exist_ok=True)
     epochs = history_df['epoch']
 
+    # -------- Training Loss --------
     plt.figure()
-    plt.plot(epochs, history_df['loss'], marker='o')
+    plt.plot(
+        epochs,
+        history_df['loss'],
+        marker='o',
+        color='blue',
+        label="Training Loss"
+    )
     plt.xlabel("Epoch")
     plt.ylabel("BCE Loss")
     plt.title("Training Loss vs Epoch")
+    plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.savefig("./plot/training_loss.png", dpi=300)
     plt.close()
 
+    # -------- HR@10 --------
     plt.figure()
-    plt.plot(epochs, history_df['hr_val'], marker='o', label="Validation HR@10")
+    plt.plot(
+        epochs,
+        history_df['hr_val'],   # actually training
+        marker='o',
+        color='blue',
+        label="Training HR@10"
+    )
     if hr_test is not None:
-        plt.axhline(hr_test, linestyle='--',color='red',linewidth=2, label=f"Test HR@10 = {hr_test:.4f}")
+        plt.axhline(
+            hr_test,
+            linestyle='--',
+            color='red',
+            linewidth=2,
+            label=f"Validation HR@10 = {hr_test:.4f}"
+        )
     plt.xlabel("Epoch")
     plt.ylabel("HR@10")
-    plt.title("Validation HR@10 vs Epoch")
+    plt.title("HR@10 vs Epoch")
+    plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.savefig("./plot/training_hr.png", dpi=300)
     plt.close()
 
+    # -------- NDCG@10 --------
     plt.figure()
-    plt.plot(epochs, history_df['ndcg_val'], marker='o', label="Validation NDCG@10")
+    plt.plot(
+        epochs,
+        history_df['ndcg_val'],  # actually training
+        marker='o',
+        color='blue',
+        label="Training NDCG@10"
+    )
     if ndcg_test is not None:
-        plt.axhline(ndcg_test, linestyle='--',color='red',linewidth=2, label=f"Test NDCG@10 = {ndcg_test:.4f}")
+        plt.axhline(
+            ndcg_test,
+            linestyle='--',
+            color='red',
+            linewidth=2,
+            label=f"Validation NDCG@10 = {ndcg_test:.4f}"
+        )
     plt.xlabel("Epoch")
     plt.ylabel("NDCG@10")
-    plt.title("Validation NDCG@10 vs Epoch")
+    plt.title("NDCG@10 vs Epoch")
+    plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.savefig("./plot/training_ndcg.png", dpi=300)
     plt.close()
-
 # -----------------------------
 # Main CLI
 # -----------------------------
